@@ -1,0 +1,75 @@
+Programming BS: OOP
+
+I have found that various OOP principles in Java - encapsulation, initialization, polymorphism, inheritance, access modifiers - are simply not that useful. Invariably, we either don't know how to use them, or they just don't work that well.
+
+OOP is bullshit!
+
+Encapsulation
+
+This has to be hands down the most useless OOP idea in Java. It's only natural to write libraries and frameworks and static methods to capture common code that can be reused. But that code can never be encapsulated into some random Java class in some random package. This makes encapsulation the opposite of reusable code. As a result, any significant framework will extend a class from without by using conventions like method names and annotations in combination with mechanisms like reflection and Proxy.
+
+The more general a class is, the less possible it is to capture all the operations needed. By the time you get to something like String or Optional which are the most general kind of classes, it is utterly impossible to capture everything people will want to do with the class. Hence every Java project of any size makes use of String, Commons StringUtils, and of course your own StringUtils class.
+
+Then an upgrade to Java introduces some methods similar to those in Commons StringUtils and/or Commons StringUtils is upgraded to add methods similar to your project StringUtils. Code written before the upgrade will use the older methods, while newer code might use newer methods, and sometimes both old and new method calls exist in the same class.
+
+Initialization
+
+This is definitely the next worst feature of OOP in Java. There are static initializer blocks, instance initializer blocks, inline field initialization, and constructors to choose from. Only the first line can call a super constructor, and only by simple parameter passing. If you need some branching logic or exception handling to generate the value for the super class parameter, that would have to go in a static method.
+
+This tends to lead to each framework describing an object lifecycle, where it is common to have some sort of init and destroy methods called, as these are not constructors and have no limit on branching or exception handling.
+
+Have fun implementing immutable classes using inheritance. Each subclass has to receive all parameters for itself and all super constructors up the chain. If you have a whole hierarchy of these things, it gets very tiring very quickly when you modify the classes at the top with new fields, and now the values have to be added to the entire subclass chain.
+
+Polymorphism
+
+Classes typically access their fields directly throughout the code rather than calling a getter method. This means a subclass cannot override the field type with some subclass of the field type, where the super class code could use the super field type, and the subclass code use the sub field type. This reduces polymorphism. One could argue this is not a good design, I'm only looking at it from the lens of polymorphism.
+
+OOP languages like Java use a runtime search to find the method to execute by the use of vtables. The basic idea is that each method in a class has a pair of pointers - one for the address of the method, and one pointing downward to the next overriden member, or null if this is the last member in the override chain.
+
+Suppose we have two classes: a Foo class has a doit() method and a Bar subclass that overrides doit(). The Foo class structure has doit() with a null downward pointer. The Bar class structure begins with the members of Foo, followed by the members of Bar. In the Foo portion of Bar, doit() has a downward pointer to the overriden doit() member in the Bar portion, which has a null downward pointer.
+
+But these runtime searches were really never necessary. The Bar class structure could instead simply have the Foo.doit() and Bar.doit() pointers set to the address of Bar.doit(). That way, methods can always be executed without a search. Try working out the various scenarious using direct calls, reflection, variables of super class assigned an unknown subclass instance, the invokeSpecial byte code accessible via MethodHandle. You should be able to convince yourself that in each case, it would work just fine. Searching the downward pointers simply provides a puritanical view of the class structure, it offers no other benefit.
+
+Inheritance
+
+It is generally considered that composition is more powerful than inheritance - a perfect example is the immutable objects I referred to earlier, which was related to initialization. Another reason is that Java inheritance only allows, for sanity, one superclass (I agree emphatically with that decision), while there is no limit on interfaces. Ultimately inheritance is mainly limited by the fact that changes in superclasses always ripple down to subclasses.
+
+This is good when adding new superclass methods, but an annoyance when modifying superclass method signatures. With composition, the containing class can be modified without impacting the composed class, and vice-versa. Constructor changes only affect the users of the composed classes.
+
+Access Modifiers
+
+We have just never figured out when to make things private, package protected, protected, or public. You want a private constructor, until you need a subclass. You want a private field, until you create an inner or nested class, and want to avoid synthetic accessors. We have all used a library that marked some method as private that we really needed to override, and wound up making a copy of the class we can use instead of the original.
+
+Code Organization
+
+OOP by itself just doesn't address how to keep code maintainable, nor was it ever designed to. It's like a set of tools a steel worker uses to build things - the worker needs an engineer to make the design first, otherwise he's not likely to get very far. That's where ideas like MVC come in - you can use MVC in a purely imperative language like C, it isn't really an OOP concept, it's more of a pattern for isolation and separation of concerns.
+
+An Alternative for Java
+
+Interfaces are far better than classes for the following reasons:
+
+1. Default methods mean an interface can provide an implementation. Since their introduction in Java 8, interfaces are now as powerful as a concrete class, with the exception of corner cases like native methods and finalizers.
+
+2. No constructors, making initialization somewhat better. EG, if a Java bean were an interface, a static method in the interface could simply accept all the needed values for the whole inheritance hierarchy. This is still a pain for immutable objects, I don't see any way around that pain but favouring composition. At least you don't have all the fuss around fields, since you don't have any! Note that for beans, the runtime Proxy can maintain an internal Map<String, Object> to map the property names to their values - which can even be exposed to the user.
+
+3. No Access modifiers. All methods are public by default, and no other modifier can be applied. Since it's all public at runtime anyway, interfaces are just more honest about it. If you need some common code you can use static methods, or Java 9 private methods.
+
+4. Force whatever standards you want. EG, for a Java Bean, you could enforce that there can be a getter by itself but not a setter by itself (unless it has a default implementation), you could have annotations indicating values cannot be null, etc. You could have a single implementation of hashCode, equals, and toString that protects against object graph cycles (including Collections and Maps).
+
+5. Concrete classes can be generated at runtime. This is how a Spring Data Repository works - you just implement Repository (or one of the subinterfaces like CrudRepository), and at runtime Spring auto generates an implementation which can be injected and used like any other Spring Bean. Many other things could be written in a similar way.
+
+6. Concrete classes can be generated at compile time using an Annotation Processor. There are always going to be some cases where you need new methods to be generated. Examples include generating Builder classes that can build your Java beans, or reusable visitors that can visit the graph nodes with methods that get called before and after a given node is visited.
+
+7. DI is still possible. For example, If a class needs a servce injected, it can simply have a non-default getter method that returns the service class. The proxy for the interface can consult the DI system to get the instance required. An annotation can be applied on the getter to specify which instance is desired when there are multiple.
+Once you see how much easier it is to use the Spring Data Repository for data querying, is it really such a stretch to just do everything that way? This feels to me like a simple evolution in understanding of the usefulness of OOP - quit using the things that get in the way, and cut down to the one thing that doesn't - interfaces.
+
+Thinking a bit further along this line, consider all the work required for Spring, JPA, etc to generate subclasses using tools like CGLIB - they have to have all these restrictions like classes can't be final, can't have a private constructor, can't have private methods, etc. In other words, they have to be more like an interface - so why not just use them instead, and trim a ton of corner case fat in the process?
+
+Conclusion
+
+I see articles every now and then saying things like "always use encapsulation". These articles are about as intelligent as a carpenter saying "always use a chisel". OOP as a paradigm was a good idea at the time, but adhering to its principles just for the sake of using them does nothing to aid in writing good code.
+
+Good code is like any other type of engineering, a combination of science and art, where the art is in choosing the science. A better approach is to consider OOP to be a set of tools, alongside other tools like FP, reflection, Proxy, MethodHandle, etc. Writing code is kind of building process, and if you ask any builder of physical things, they will undoubtedly have stories of tools that just weren't what they were all cracked up to be.
+
+It's time we recognized this with OOP, and stick to the good stuff. Make simpler libraries that make better use of interfaces, and write concrete classes only for the supporting structures needed to use only interfaces. Obviously, this only became possible with Java 8 default interface methods. I'd love to see some new libraries come out that really push this idea - they could be significantly smaller and simpler to maintain.
+
