@@ -46,7 +46,7 @@ Every spaghetti project I've seen has some kind of bad statefulness. Typically, 
 1. Encapsulation
 2. Call chains
 
-Encapsulation can be done in a good way, but sometimes the logic is just so obtuse that it is nearly impossible to follow, without running a debugging session and stepping through the code. There's not much point in making a "black box" of data and behaviour if only God unserstands the black box operation.
+Encapsulation can be done in a good way, but sometimes the logic is just so obtuse that it is nearly impossible to follow, without running a debugging session and stepping through the code. There's not much point in making a "black box" of data and behaviour if only God understands the black box operation.
 
 Sometimes method A calls method B which calls method C, etc down to method J. These kind of deep call chains often have two problems:
 1. Method J needs a new parameter, but would have to be passed down from A through I first
