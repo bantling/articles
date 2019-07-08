@@ -1,0 +1,30 @@
+Go template pattern with embedded structs
+
+Go allows the embedding of one struct inside another, where the embedded struct methods (both value and pointer receiver) can be accessed as if they were methods of the outer struct.
+
+As it turns out, the embedded struct doesn't have to be a struct - it can declared as an interface, and/or the implementation can be a function instead of a struct. Declaring an embedded interface makes it possible to have a default implementation provided by a constructor function, while unit testing can provide a test implementation.
+
+There is no limit on the number of structs that can be embedded - this is where the template pattern comes in. The basic idea is as follows:
+1. Define some interfaces for the methods (ideally, one method per interface).
+2. Define a template interface that includes all of the above interfaces.
+3. Define a template function that can operate on an instance of the template interface. It will likely need some additional parameters.
+4. Define one or more structs that implement the single method interfaces.
+
+See this playground code for an example of the above: https://play.golang.org/p/OUkKc7GReWk
+
+One nice thing about this pattern is that it offers both reusability and flexibility:
+1. Methods that can be handled in a common way can be satisfied by embedding a struct that provides the common implementation.
+2. Methods whose operation is unique to the struct can be implemented as an ordinary method.
+3. A constructor function for a struct can set the embedded structs to implementations that are useful under real world conditions.
+4. A unit test can construct the struct by manually setting the embedded structs to stub implementations, as necessary.
+
+Other nice features I like about this pattern include:
+1. The ability to use unexported type aliases so the struct can prevent code outside the package from changing implementations, while still satisfying the template interface needed by the algorithm.
+2. Implement all the "fiddly bits" of the pattern once in the algorithm, such as error handling code.
+3. Prevent fixing the same bugs over and over in multiple services due to making the same simple mistakes. 
+
+Conclusion
+
+I think the template pattern can be a really good fit for Go's embedded structs feature, and can help to guide the writing of multiple services in separate projects (eg, microservices) that have a common structure. Using a template pattern can make similar sets of operations easier to understand by formalizing their sameness.
+
+I'd be interested in hearing from people who have used the template pattern in Go, whether by the way I described, or in some other way.

@@ -1,0 +1,18 @@
+1. Use every possible form of configuration: SQl, LDAP, files (properties/yaml/xml, etc), environment variables,
+system properties, command line args, uDeploy tokens, Jenkins parameters, etc.
+
+2. Never prefix configuration properties, use generic English terms that show up in thousands of unrelated places.
+
+3. Never remove unused configuration.
+
+4. Never document anything.
+
+
+Good ideas
+- No JS code for existence, JSOn always has keys to empty string/array/object, never null or undefined
+
+- Only positive if statements, no "if not"
+
+- Each field that a boolean display flag to indicate yes/no display it. UI tests flag before displaying.
+
+- Seperate silos for each data type (eg, Customer Address and Warehouse Address
