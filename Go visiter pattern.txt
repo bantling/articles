@@ -1,0 +1,364 @@
+> Title
+
+Go visitor pattern
+
+> Summary
+
+One feature that Go does not offer that is really useful in visitor patterns is overriding methods. The basic idea is to write a concrete class that contains all the VisitX methods with empty implementations, and a subclass can choose to only override the methods it cares about, ignoring the rest.
+We'll see an example of how to implement this pattern in idiomatic Go code.
+
+> Example using method overrides
+
+The code for a visitor pattern would look something like this in pseudo Java code:
+
+========
+class Customer {
+  String firstName
+  String lastName
+
+  Customer(String firstName, String lastName) {
+    this.firstName = firstName
+    this.lastName = lastName
+  }
+}
+
+class AllCustomers {
+  List<Customer> customers
+
+  AllCustomers(List<Customer> customers) {
+    this.customers = customers
+  }
+}
+
+abstract class AbstractVisitor<T> {
+  void init()
+
+  void visitPreAllCustomers(AllCustomers allCustomers)
+
+  void visitPreCustomer(Customer customer)
+  void visitFirstName(String firstName)
+  void visitLastName(String firstName)
+  void visitPostCustomer(Customer customer)
+
+  void visitPostAllCustomers(AllCustomers allCustomers)
+
+  abstract T result()
+}
+
+class CustomersPrinter extends AbstractVisitor<String> {
+  StringBuilder bldr
+
+  void init() {bldr.delete(0, blr.length())}
+
+  void visitPreCustomer(Customer customer) {bldr.append('[')}
+  void visitFirstName(String firstName) {bldr.append(firstName)}
+  void visitLastName(String firstName) {bldr.append(", ").append(lastName)}
+  void visitPostCustomer(Customer customer) {bldr.append(']')}
+
+  String result() {
+    return bldr.ToString()
+  }
+}
+
+class AllCustomersDepthFirstWalker<T> {
+  AbstractVisitor<T> visitor
+
+  AllCustomersDepthFirstWalker(
+    AbstractVisitor<T> visitor
+  ) {
+    this.visitor = visitor
+  }
+
+  T walk(AllCustomers allCustomers) {
+    visitor.init()
+
+    visitor.visitPreAllCustomers(allCustomers)
+
+    for customer: allCustomers.customers {
+      visitor.visitPreCustomer(normalCustomer)
+
+      visitor.visitFirstName(normalCustomer.firstName)
+      visitor.visitLastName(normalCustomer.lastName)
+
+      visitor.visitPostCustomer(normalCustomer)
+    }
+
+    visitor.visitPostAllCustomers(allCustomers)
+
+    return visitor.result()
+  }
+}
+
+void main(String[] args) {
+  AllCustomers allCustomers = new AllCustomers(
+    Arrays.asList(
+      new Customer("John", "Doe"),
+      new Customer("Jane", "Doe"),
+    )
+  )
+
+  CustomersPrinter p = new CustomersPrinter();
+  AllCustomersDepthFirstWalker w = new AllCustomersDepthFirstWalker<String>(p)
+  System.out.Println(w.walk(allCustomers))
+}
+========
+
+> Writing a visitor in Go
+
+Since Go doesn't allow overrides, we need to figure out how we can create CustomersPrinter, bearing in mind the following considerations:
+- Visitor implementations should only have to implement the methods they need
+- If new visit methods are added, existing visitor implementations should compile and work without changes
+- Go does not have generics, and it would be nice if Result() does not return interface{}, but the actual type
+
+One way to solve this is as follows:
+- Declare one interface per visitor method
+- Declare an interface that combines all the single method interfaces into one interface of all methods
+- There is no interface for the result method
+- One of the single method interfaces is for an init method of no arguments, allowing a visitor instance to be reused any number of times
+- Declare an adapter struct that takes an instance of the single method init interface, and adapts it to the interface of all methods, using empty implementations for anything not implemented
+- Visitor implementations just implement the init interface and whatever subset of other single method interfaces are needed
+- The walker does not provide a result method - the visitor does, so that it can return it as the desired type
+- The caller does the following:
+  - Create a visitor instance that implements a subset of single method interfaces
+  - Use the adapter to adapt the visitor into an implementation of all interfaces
+  - Create a walker with the adapter visitor and use it to the walk an instance
+
+Example of Go code
+- AllCustomers is the type to walk
+- AllCustomersVisitorInit is the init method interface
+- AllCustomersVisitor is the interface that combines all single method interfaces into one
+- The remaining *Visitor interfaces are the other single method interfaces
+- CustomerVisitorAdapter is the adapter
+- CustomerVisitorAdapter can reuse the same underlying visitor, or you can change the visitor between walks
+- CustomersPrinter is the visitor that only implements a subset of single method interfaces that needs to be adapted
+- AllCustomersDepthFirstWalker is the walker that expects a full implementation of all visitor methods
+
+Run it at https://play.golang.org/p/d_9zVAS-6Oo
+
+========
+package main
+
+import (
+  "fmt"
+  "strings"
+)
+
+type Customer struct {
+  FirstName string
+  LastName string
+}
+
+type AllCustomers struct {
+  Customers []Customer
+}
+
+type AllCustomersVisitorInit interface {
+  Init()
+}
+
+type PreAllCustomersVisitor interface {
+  VisitPreAllCustomers(allCustomers AllCustomers)
+}
+
+type PreCustomerVisitor interface {
+  VisitPreCustomer(customer Customer)
+}
+
+type FirstNameVisitor interface {
+  VisitFirstName(firstName string)
+}
+
+type LastNameVisitor interface {
+  VisitLastName(lastName string)
+}
+
+type PostCustomerVisitor interface {
+  VisitPostCustomer(customer Customer)
+}
+
+type PostAllCustomersVisitor interface {
+  VisitPostAllCustomers(allCustomers AllCustomers)
+}
+
+type AllCustomersVisitor interface {
+  AllCustomersVisitorInit
+
+  PreAllCustomersVisitor
+
+  PreCustomerVisitor
+  FirstNameVisitor
+  LastNameVisitor
+  PostCustomerVisitor
+
+  PostAllCustomersVisitor
+}
+
+type CustomerVisitorAdapter struct {
+  initVisitor AllCustomersVisitorInit
+
+  preAllCustomersVisitor func(AllCustomers)
+
+  preCustomerVisitor func(Customer)
+  firstNameVisitor func(string)
+  lastNameVisitor func(string)
+  postCustomerVisitor func(Customer)
+
+  postAllCustomersVisitor func(AllCustomers)
+}
+
+func NewCustomerVisitorAdapter(visitor ...AllCustomersVisitorInit) *CustomerVisitorAdapter {
+  va := &CustomerVisitorAdapter{}
+
+  if len(visitor) > 0 {
+    va.WithVisitor(visitor[0])
+  }
+
+  return va
+}
+
+func (va *CustomerVisitorAdapter) WithVisitor(visitor AllCustomersVisitorInit) {
+  if visitor == nil {
+    panic(fmt.Errorf("CustomerVisitorAdapter.WithVisitor: visitor cannot be nil"))
+  }
+
+  va.initVisitor = visitor
+
+  va.preAllCustomersVisitor = func(AllCustomers) {}
+  if v, ok := visitor.(PreAllCustomersVisitor); ok {
+    va.preAllCustomersVisitor = v.VisitPreAllCustomers
+  }
+
+  va.preCustomerVisitor = func(Customer) {}
+  if v, ok := visitor.(PreCustomerVisitor); ok {
+    va.preCustomerVisitor = v.VisitPreCustomer
+  }
+  
+  va.firstNameVisitor = func(string) {}
+  if v, ok := visitor.(FirstNameVisitor); ok {
+    va.firstNameVisitor = v.VisitFirstName
+  }
+  
+  va.lastNameVisitor = func(string) {}
+  if v, ok := visitor.(LastNameVisitor); ok {
+    va.lastNameVisitor = v.VisitLastName
+  }
+  
+  va.postCustomerVisitor = func(Customer) {}
+  if v, ok := visitor.(PostCustomerVisitor); ok {
+    va.postCustomerVisitor = v.VisitPostCustomer
+  }
+
+  va.postAllCustomersVisitor = func(AllCustomers) {}
+  if v, ok := visitor.(PostAllCustomersVisitor); ok {
+    va.postAllCustomersVisitor = v.VisitPostAllCustomers
+  }
+}
+
+func (va CustomerVisitorAdapter) Init() {
+  va.initVisitor.Init()
+}
+
+func (va CustomerVisitorAdapter) VisitPreAllCustomers(allCustomers AllCustomers) {
+  va.preAllCustomersVisitor(allCustomers)
+}
+
+func (va CustomerVisitorAdapter) VisitPreCustomer(customer Customer) {
+  va.preCustomerVisitor(customer)
+}
+
+func (va CustomerVisitorAdapter) VisitFirstName(firstName string) {
+  va.firstNameVisitor(firstName)
+}
+
+func (va CustomerVisitorAdapter) VisitLastName(lastName string) {
+  va.lastNameVisitor(lastName)
+}
+
+func (va CustomerVisitorAdapter) VisitPostCustomer(customer Customer) {
+  va.postCustomerVisitor(customer)
+}
+
+func (va CustomerVisitorAdapter) VisitPostAllCustomers(allCustomers AllCustomers) {
+  va.postAllCustomersVisitor(allCustomers)
+}
+
+type CustomersPrinter struct {
+  bldr strings.Builder
+}
+
+func (p *CustomersPrinter) Init() {p.bldr.Reset()}
+
+func (p *CustomersPrinter) VisitPreCustomer(Customer) {p.bldr.WriteRune('[')}
+
+func (p *CustomersPrinter) VisitFirstName(firstName string) {p.bldr.WriteString(firstName)}
+
+func (p *CustomersPrinter) VisitLastName(lastName string) {p.bldr.WriteString(", "); p.bldr.WriteString(lastName)}
+
+func (p *CustomersPrinter) VisitPostCustomer(Customer) {p.bldr.WriteRune(']')}
+
+func (p *CustomersPrinter) Result() string {return p.bldr.String()}
+
+type AllCustomersDepthFirstWalker struct {
+  visitor AllCustomersVisitor
+}
+
+func NewAllCustomersDepthFirstWalker(visitor AllCustomersVisitor) AllCustomersDepthFirstWalker {
+  return AllCustomersDepthFirstWalker{visitor}
+}
+
+func (w AllCustomersDepthFirstWalker) walk(allCustomers AllCustomers) {
+  w.visitor.Init()
+
+  w.visitor.VisitPreAllCustomers(allCustomers)
+
+  for _, c := range allCustomers.Customers {
+    w.visitor.VisitPreCustomer(c)
+    w.visitor.VisitFirstName(c.FirstName)
+    w.visitor.VisitFirstName(c.LastName)
+    w.visitor.VisitPostCustomer(c)
+  }
+
+  w.visitor.VisitPostAllCustomers(allCustomers)
+}
+
+func main() {
+  allCustomers := AllCustomers{
+    Customers: []Customer{
+      Customer{FirstName: "John", LastName: "Doe"},
+      Customer{FirstName: "Jane", LastName: "Doe"},
+    },
+  }
+
+  p := &CustomersPrinter{}
+  va := NewCustomerVisitorAdapter(p)
+  w := NewAllCustomersDepthFirstWalker(va)
+  w.walk(allCustomers)
+  fmt.Println(p.Result())
+}
+========
+
+> Maintenance
+
+Over time, new fields will be added to the data structure that we need to walk over.
+This results in the following additional changes:
+. New single method interace(s) for each new fields
+. Addition of above new interfaces to AllCustomersVisitor interface
+. Addition of new interface methods to NewCustomerVisitorAdapter
+
+We can create a unit test that uses the AllCustomersDepthFirstWalker to test a particular visitor, such as the CustomersPrinter above.
+Since Go uses duck typing for interfaces, if we add new interfaces and forget to put them in the adapter, Go won't complain about the adapter, because it has no way of knowing it is supposed to implement all the single method interfaces.
+If we pass a constructed instance of our adapter to the walker, the walker expects an instance of AllCustomersVisitor.
+This means if we forget to add new interface methods to the adapter, our unit test will fail to compile on the call to NewAllCustomersDepthFirstWalker.
+Technically, we could also forget to add the new interfaces to AllCustomersVisitor, and no compile error would occur.
+Realistically, as long we addd unit tests to verify the new methods work in a visitor that uses them, the updated test won't pass until all affected types are updated.
+
+> Conclusion
+
+The Go version isn't drastically different from the Java version, we just need to maintain an extra struct that adapts a subset of all visitor methods into a full implementation.
+Beyond that, the number of lines of code to implement an actual visitor and use it to walk a data structure is similar to Java.
+Adding new method(s) will not take noticeably longer than in a language that supports method overrides.
+All three goals set out for the Go code have been met:
+- Visitors only have to implement the minimum set of single method interfaces needed to perform an operation
+- Existing visitor implementations are not affected by the addition of new single method interfaces (only the adapter has to handle them)
+- We don't need generics in Go, we can simply simply not declare any result interface, and let each visitor implementation declare its own result method with the correct type
+In addition to the above, we just use ordinary unit testing to ensure the adapter is correctly maintained.

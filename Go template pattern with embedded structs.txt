@@ -12,6 +12,312 @@ There is no limit on the number of structs that can be embedded - this is where 
 
 See this playground code for an example of the above: https://play.golang.org/p/OUkKc7GReWk
 
+========
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+)
+
+////////
+// Interface defs for each template step, and algorithm to execute them
+////////
+
+type Unmarshaler interface {
+	Unmarshal([]byte) error
+}
+
+type PreQueryLogicApplyer interface {
+	ApplyPreQueryLogic() error
+}
+
+type QueryPerformer interface {
+	PerformQuery() error
+}
+
+type PostQueryLogicLogicAppyler interface {
+	ApplyPostQueryLogic() error
+}
+
+type Marshaler interface {
+	Marshal() ([]byte, error)
+}
+
+type CacheKeyGenerator interface {
+	GenerateCacheKey() string
+}
+
+type CacheWriter interface {
+	WriteCache(string, []byte) error
+}
+
+type Notifier interface {
+	Notify([]byte) error
+}
+
+type Template interface {
+	Unmarshaler
+	PreQueryLogicApplyer
+	QueryPerformer
+	PostQueryLogicLogicAppyler
+	Marshaler
+	CacheKeyGenerator
+	CacheWriter
+	Notifier
+}
+
+func applyTemplate(t Template, data []byte) {
+	log.Println("Template execution started")
+
+	// Unmarshaling errors are terminal
+	var err error
+	if err = t.Unmarshal(data); err != nil {
+		log.Printf("Template error unmarshaling: %v", err)
+		return
+	}
+
+	// Pre query logic errors are terminal
+	if err = t.ApplyPreQueryLogic(); err != nil {
+		log.Printf("Template error applying pre query logic: %v", err)
+		return
+	}
+
+	// Query errors are terminal
+	if err = t.PerformQuery(); err != nil {
+		log.Printf("Template error performing query: %v", err)
+		return
+	}
+
+	// Post query logic errors are terminal
+	if err = t.ApplyPostQueryLogic(); err != nil {
+		log.Printf("Template error applying post query logic: %v", err)
+		return
+	}
+
+	// Marshaling errors are terminal
+	var newData []byte
+	if newData, err = t.Marshal(); err != nil {
+		log.Printf("Template error marshaling: %v", err)
+		return
+	}
+
+	// Cache key generation has no error
+	cacheKey := t.GenerateCacheKey()
+
+	// Cache writing errors are ignored
+	if err = t.WriteCache(cacheKey, newData); err != nil {
+		log.Printf("Template error writing to cache: %v", err)
+	}
+
+	// Notification errors are ignored
+	if err = t.Notify(newData); err != nil {
+		log.Printf("Template error sending notification: %v", err)
+	}
+
+	log.Println("Template execution completed")
+}
+
+////////
+// Reusable interface implementations
+////////
+
+type RedisCacheWriter struct {
+	// We need some fields for the redis connection info
+}
+
+func (r RedisCacheWriter) WriteCache(key string, data []byte) error {
+	// We would store the bytes in the Key
+	log.Printf("RedisCacheWriter: writing key %s = %s", key, data)
+	return nil
+}
+
+type WebSocketNotifier struct {
+	// We need some fields for the websocket connection info
+}
+
+func (w WebSocketNotifier) Notify(data []byte) error {
+	// We would send data via websockets
+	log.Printf("WebSocketNotifier: %s", data)
+	return nil
+}
+
+////////
+// Example template implementation for a customer
+////////
+
+type Customer struct {
+	ID         string `json:"id"`
+	FirstName  string `json:"firstName"`
+	MiddleName string `json:"middleName"`
+	LastName   string `json:"lastName"`
+}
+
+var (
+	firstNameRequiredError = errors.New("FirstName is required")
+	lastNameRequiredError  = errors.New("LastName is required")
+)
+
+// Create unexported type aliases, so that the CustomerTemplate can have unexported fields
+// that still satisfy the Template interface.
+type cacheWriter = CacheWriter
+type notifier = Notifier
+
+type CustomerTemplate struct {
+	cacheWriter
+	notifier
+	customer    Customer
+}
+
+func NewCustomerTemplate() *CustomerTemplate {
+	return &CustomerTemplate{
+		cacheWriter: RedisCacheWriter{},
+		notifier: WebSocketNotifier{},
+	}
+}
+
+func (t *CustomerTemplate) Unmarshal(data []byte) error {
+	err := json.Unmarshal(data, &t.customer)
+	log.Printf("CustomerTemplate: Unmarshal: %s = %+v (%v)", data, t.customer, err)
+	return err
+}
+
+func (t CustomerTemplate) ApplyPreQueryLogic() error {
+	log.Println("CustomerTemplate: ApplyPreQueryLogic")
+
+	if t.customer.FirstName == "" {
+		return firstNameRequiredError
+	}
+
+	if t.customer.LastName == "" {
+		return lastNameRequiredError
+	}
+
+	return nil
+}
+
+func (t CustomerTemplate) PerformQuery() error {
+	// Perform an SQL query
+	log.Println("CustomerTemplate: PerformQuery")
+	return nil
+}
+
+func (t *CustomerTemplate) ApplyPostQueryLogic() error {
+	// Maybe we need to alter the object in some based on query results
+	// EG, the query stores a JSON payload and returns the modified payload
+	log.Println("CustomerTemplate: ApplyPostQueryLogic")
+
+	return nil
+}
+
+func (t CustomerTemplate) Marshal() ([]byte, error) {
+	data, err := json.Marshal(t.customer)
+	log.Printf("CustomerTemplate: Marshal %s = %v", data, err)
+	return data, err
+}
+
+func (t CustomerTemplate) GenerateCacheKey() string {
+	key := t.customer.ID
+	log.Printf("CustomerTemplate: GenerateCacheKey = %s", key)
+	return key
+}
+
+// This would normally be an actual test method
+// For simplicity we just use a normal method, so it all fits in one source file
+type TestHarness struct {
+	writeCacheError error
+	notifyError error
+	cacheKey string
+	cacheData []byte
+	notifyData []byte
+}
+
+func (tw *TestHarness) WriteCache(key string, data []byte) error {
+	if tw.writeCacheError != nil {
+		return tw.writeCacheError
+	}
+
+	tw.cacheKey = key
+	tw.cacheData = data
+	return nil
+}
+
+func (tw *TestHarness) Notify(data []byte) error {
+	if tw.notifyError != nil {
+		return tw.notifyError
+	}
+
+	tw.notifyData = data
+	return nil
+}
+
+func test() {
+	log.Println("==== TEST success case ====")
+
+	c := Customer{ID: "5678", FirstName: "Jane", LastName: "Doe"}
+	data, err := json.Marshal(c)
+	if err != nil {
+		panic(err)
+	}
+
+	h := &TestHarness{}
+	ct := &CustomerTemplate{
+		cacheWriter: h,
+		notifier: h,
+	}
+
+	applyTemplate(ct, data)
+
+	if h.cacheKey != "5678" {
+		panic(fmt.Errorf("expected cacheKey 5678, got %s", h.cacheKey))
+	}
+
+	if string(h.cacheData) != string(data) {
+		panic(fmt.Errorf("expected cacheData %s, got %s", h.cacheData, h.cacheKey))
+	}
+
+	log.Println("==== TEST failure writing cache  ====")
+
+	wce := errors.New("Unable to write cache")
+	ne := errors.New("Unable to notify")
+	h = &TestHarness{
+		writeCacheError: wce,
+		notifyError: ne,
+	}
+	ct = &CustomerTemplate{
+		cacheWriter: h,
+		notifier: h,
+	}
+
+	applyTemplate(ct, data)
+
+	if h.cacheData != nil {
+		panic(fmt.Errorf("expected nil cacheData, got %s", h.cacheData))
+	}
+
+	if h.notifyData != nil {
+		panic(fmt.Errorf("expected nil notifyData, got %s", h.notifyData))
+	}
+}
+
+func main() {
+	c := Customer{ID: "1234", FirstName: "John", MiddleName: "James", LastName: "Doe"}
+	data, err := json.Marshal(c)
+	if err != nil {
+		panic(err)
+	}
+
+	log.Println("main: executing template")
+	ct := NewCustomerTemplate()
+	applyTemplate(ct, data)
+
+	log.Println("main: executing test")
+	test()
+}
+========
+
 One nice thing about this pattern is that it offers both reusability and flexibility:
 1. Methods that can be handled in a common way can be satisfied by embedding a struct that provides the common implementation.
 2. Methods whose operation is unique to the struct can be implemented as an ordinary method.

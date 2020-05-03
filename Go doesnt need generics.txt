@@ -1,0 +1,114 @@
+> Title
+
+Go doesn't need generics
+
+> Summary
+
+A recent survey (https://blog.golang.org/survey2019-results) suggests that 79% of respondents felt that generics are a "critical" missing feature of Go.
+I can only assume these programmers must:
+a) Have a very different notion of critical than my own
+b) Work in very different problem domains
+c) Exaggerate
+d) Some combination of the above
+
+I won't attempt to figure out which applies, I will instead simply explain why I have never felt like Go needs generics.
+I'll begin by explaining what I have found using generics for years in Java, from versions 1.5 through 1.8.
+
+I will say I'm not a religious programmer. I have no sentences about programming involving phrases like "have to", "never", "always", "you can't", etc.
+Getting 10 programmers to agree on practically anything is nigh impossible, and I have no interest in swaying anyone to my opinion.
+If someone feels generics are super important, it's a free country.
+
+> Java generics
+
+I began using Java personally when it was first released, and began using it professionally at Java 1.5.
+When generics first arrived in Java 1.5, I did not sigh a breath of relief.
+I had primarily used generics in lists and maps, and did not find casting to be a burden.
+After all, you only have to cast when pulling objects out (return result) not when putting them in (parameters).
+
+Technically, using raw lists and maps in Java allows adding random different types and probably getting ClassCastExceptions when reading values.
+In practice, most lists and maps are localised within a method - the structure is created inside a method and thrown away before it returns.
+In such localised uses, it is pretty obvious what type of data is supposed to be used, so casting values correctly is hardly challenging.
+
+Who cares if you have to cast values when pulling them out?
+After all, Java's type erasure requires casting to be added to code that uses generic return results anyway.
+Just because you don't see it doesn't mean it isn't there.
+
+I did encounter some problems with generics in Java, I'll just give a couple of examples.
+
+>> Java developers actually don't understand more than the basics
+
+Try asking 10 Java devs the following questions, and see how many they get right (chances are it will be zero):
+. How can I acquire Class<List<String>>?
+. What is the difference between List<Foo>, List<? super Foo>, and List<? extends Foo>?
+. Under what conditions is a generic type preserved at runtime, rather than lost to type erasure?
+. If a generic type is preserved at runtime, how can I determine if it is Map<String, Integer> via reflection?
+
+In my experience, average developers don't understand these details, and simply don't care.
+They see it as irrelevant because they almost never write generic classes or methods of their own.
+Their usage of generics is generally limited to collections.
+
+>> Generics are hard to use in libraries and frameworks
+
+Don't think so? Try writing one! Try handling the following:
+. Primitive and object types
+. Ensuring that primitives and their associated wrappers are handled interchangeably
+. Handling generic arrays, wildcards, lower bounds, upper bounds, and type variables
+. Analyzing generic signatures of fields, parameters and return types to ensure they follow some expected pattern
+. Translating objects between different generic types (eg translate a List<String> to List<[]String> by mapping each String to a one element array)
+
+>> What's the real benefit?
+
+If devs on average only really use generics for collections, and writing libraries with it is hard, then doesn't it stand to reason that collections are their only significant use case?
+Perhaps the Go designers understood this, and applied it by making Go's slices and maps intrinsically generic through language syntax.
+
+My coworkers, all of whom like me learned Go having come from a Java background, have never once made any mention of generics in the year and few months since we started using Go.
+Literally, the word has not escaped anyone's lips.
+I feel confident if I asked them what their care factor is, they would say that slices and maps are good enough, just as I would.
+
+> Strategies in Go
+
+Since Go has no generics, at least for now, it's only sensible to find ways of dealing with it.
+I can think of a few simple ones.
+
+The most obvious is to point out that we can pass anything for empty interface parameters, it is only for return types we have to cast.
+Using parameters whenever practical is the simplest solution.
+
+In another article about the visitor design pattern (https://dzone.com/articles/go-visitor-pattern), I showed a strategy of simply not declaring the one method in the pattern that would need to return different types in the declared interfaces.
+Instead, let each struct implementation declare the method to return whatever type is needed.
+Effectively, we have a design contract - every implementation would be expected to provide a certain method name with a similar signature, it just isn't formalized with an interface.
+
+Suppose a struct has a small number of methods that return empty interface.
+Another struct could embed an instance of it, and re-declare the few methods in question to return a particular type.
+The implementation would merely call the embedded struct method and cast the type on behalf of the caller, like so:
+
+========
+package main
+
+import "fmt"
+
+type Foo struct {}
+
+func (f Foo) Bar(i int) interface{} {
+  return i
+}
+
+type FooAsInt struct {
+  Foo
+}
+
+func (f FooAsInt) Bar(i int) int {
+  return f.Foo.Bar(i).(int)
+}
+
+func main() {
+  var i int = FooAsInt{}.Bar(5)
+  fmt.Println(i)
+}
+========
+
+> Conclusion
+
+I personally hope that Go never has generics, or if it does, the designers find some way to avoid the complexity and difficulties I have seen in both Java generics and C++ templates.
+There are significant issues using plain old Go code, and it fits perfectly with my own preferences.
+Go is a breath of fresh air, particularly because the community seems to generally espouse simplicity over giant over-complicated frameworks.
+It is my sincere hope none of this ever changes in Go.
