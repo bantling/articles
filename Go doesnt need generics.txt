@@ -109,6 +109,6 @@ func main() {
 > Conclusion
 
 I personally hope that Go never has generics, or if it does, the designers find some way to avoid the complexity and difficulties I have seen in both Java generics and C++ templates.
-There are significant issues using plain old Go code, and it fits perfectly with my own preferences.
+There are no significant issues using plain old Go code, and it fits perfectly with my own preferences.
 Go is a breath of fresh air, particularly because the community seems to generally espouse simplicity over giant over-complicated frameworks.
 It is my sincere hope none of this ever changes in Go.
