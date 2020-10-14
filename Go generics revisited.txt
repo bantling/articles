@@ -1,0 +1,115 @@
+> Title
+
+Go generics revisited
+
+> Summary
+
+In my last article on this topic, I didn't define some terms, and have some further analysis to add to it.
+
+> Definitions
+
+>> Critical
+
+First, I'll define critical in terms of programming language features/libraries: anything I can't reasonably write software without. A lot of things I would call very beneficial, but very few things I would consider critical.
+
+I would consider language features like some kind of parallelism to be very beneficial, but not critical. It's definitely less pleasant in a language like C to manage threads via an API, but there's always examples you can follow, you're not in a vacuum. The only things I would call critical in a language are stuff every general purpose language has anyway, such as control flow statements and grouping functions together (such as classes, modules, namespaces).
+
+For libraries, I would consider an http implementation, crypto functions, and database drivers to be critical. I just don't have time to waste reinventing these wheels, and I doubt my API would be so much better than what's been done already anyway. And if I did want to write some API around these ideas, I would just write it on top of the provided abstractions anyway, I definitely would not start from scratch.
+
+>> Collections
+
+I view a collection in a more abstract way than just what a language like Java calls collections: an aggregate that contains one or more objects with an API for accessing them, with some combination of read, write, add, remove, and transform operations.
+
+According to this view, sure, lists, sets, and maps are all collections. But so is an Optional - it is a collection of one value that may or may not exist, and the api is centered around performing transformations and access to the value safely without NPEs if the value does not exist.
+
+A Stream is a collection of items with an API to queue up operations like transforms and filters, and ultimately producing a new value by iterating each element, performing the queued up operations on it, and collecting the results into a new value - which may be a whole new structure or just a single value.
+
+When you write a Customer class that contains a List<Address>, really you're writing a custom collection. It has some strings for the Customer's name parts, and some more strings for the parts of each address. The only real difference between this custom collection and a general one is that it has labels - unlike a List<String>, where each string has no special meaning, they're just a bucket of strings, the Customer offers labels like first name, middle name, and last name.
+
+If you follow the Single Responsibility Principle, the Customer class should not be anything but a collection - it should only have getters and setters, and in Java it would generally have custom hashCode, equals, and toString methods. Some of those getters and setters can be higher level: the Customer class could have getters/setters for specific address types (such as billing, mailing, and physical). These higher level getters/setters would help to ensure you never have two addresses of the same type, since that doesn't make sense.
+
+So if the Customer class is just a custom collection, why bother with it at all? Why not just use ordinary generic collections?
+
+- Generic declarations such as "Map<String, Object>" convey no meaning.
+- Tools like ORMs and marshallers that convert objects to and from database rows and text formats would be unable to do one upfront analysis - every time they receive the map or list or set, they would to do something like read the first item, analyze it, and assume the remaining elements are the same. They would definitely not perform as well.
+- Where do you put custom methods like the Customer getters and setters for different address types?
+- Generalized types do not provide any statement of intent - the type "Customer" immediately invokes real-world notions of a customer, someone who pays for a product. "Map<String, Object>" simply doesn't.
+
+My point being I simply fail to see some great distinction between the terms aggregate and collection, just like I fail to see the great distinction between a small and midsize car.
+
+> Generic declaration versus application
+
+Generics are always split into two separate parts: the declaration of one or more expected generic types, and the application (or usage) of these generic types.
+
+In Java's case, the declaration is NOT subject to type erasure - ONLY the application. This means that if you declare a Customer class with a field of type "List<Address>", it is possible through reflection to determine that the field's generic type is "List<Address>".
+
+This allows frameworks to make analyses. An example is the JAXB framework - it can analyze the Customer class and determine what the xml element name is for Customer. It can also analyze the List<Address> field and Address class to determine what xml element name to use for Address. It would naturally expect the Address elements to be children of the Customer element.
+
+But to actually apply generics, there are only a few ways to do so:
+- Field types
+- Constructor/Method parameters and return types
+- Analysis
+
+Sure, you can declare a generic type on your class, like the List interface declares List<T>. But that isn't usually useful in and of itself - the usefulness comes in when you have fields and constructors/methods that do something with the generic type. In the case of List, it obviously stores and returns the generic type in some kind of iterable structure, like a two way linked set of nodes.
+
+It is somewhat rare but possible to apply generics solely through analysis, using reflection. In some cases, you don't need generic methods or fields, you just need to examine things like super class declarations. For example, if XDocumentParser extends DocumentParser<X>, it is possible to examine the generic superclass of XDocumentParser to see it parses document type X, and maybe that is all you need to do to create a system that can parse different document formats with different parsers.
+
+A specialization of analysis is runtime code generation, such as Spring data: you declare an interface that extends "Repository<Customer>" and declare methods like "List<Customer> findByLastNameOrderByFirstNameAsc(String firstName)", and Spring will generate an interface implementation at runtime. In this case, the application is the generation of an implementation via Proxy. In order to generate code at runtime, it is necessary for Spring to determine what query to execute for the above method, and prepare some strategy for executing it when the method is called.
+
+Once you understand that classes that describe data are really just custom collections, and that generics can only be applied to fields, methods, and analysis, then you realize there are really only three major use cases for generics:
+
+- Collections
+- Utility methods (eg, in Java a static generic method)
+- Analysis/code generation
+
+> Generics doesn't have to be a language feature
+
+Go implements maps as a language feature, while Java does it with classes. That doesn't mean Go has superior maps - it is inarguable that Go maps have a simpler syntax, and that Java maps have more variations (eg TreeMap, LinkedHashMap, etc). Are Java maps somehow less generic because they use an API instead of a language feature? I don't think very many people would try to make any such argument.
+
+Just as Java can implement maps in a fashion everyone is happy with using an API, there are various strategies that can be used to have generic programming in a language that doesn't support it as a language feature - which is the main reason I don't see generics as critical.
+
+As a simple example, I have a library in Go that provides a facility similar to a Java stream. One of the methods of Stream is the Filter method that filters out only items in the stream that pass the filter. Here's an example:
+
+====
+fn := func(element interface{}) bool { return element.(int) < 3 }
+strm := Of(1, 2, 3)
+res := strm.Filter(fn).ToSlice()
+fmt.Printf("%T\n", []interface{}{1, 2} == res)
+====
+
+You can see the usage of the empty interface type, the Go way of storing any kind of value in a variable. The lack of generics just means that:
+
+- The filter function has to type assert that the element is an int
+- When getting a slice of all the elements in the stream that pass the filter, the slice elements are the empty interface type
+
+Stream solves these two problems in very simple ways:
+
+- There is an adapter function FilterFunc that takes a func of any argument type that returns bool and adapts it to the signature expected by Filter
+- There is an alternative ToSliceOf method that accepts one argument that is a value of whatever type you want, and returns a slice of that type - EG, if you pass a string value, is returns a slice of string elements
+
+The result is we can write equivalent code this way instead:
+
+====
+fn := FilterFunc(func(element int) bool { return element < 3 })
+strm := Of(1, 2, 3)
+res := strm.Filter(fn).ToSliceOf(0).([]int)
+fmt.Printf("%T\n", []int{}{1, 2} == res)
+====
+
+This is an improvement, as we now get to write our filter function to accept the correct type, and we get back a slice of the correct type.
+
+If you look at the Java stream implementation, it offers numeric specializations (IntStream LongSream, DoubleStream). The only real difference is they provide methods like Average and Sum. My Go version only has one Stream struct, which takes the approach where Average and Sum expect each element to be convertible to a float64.
+
+As compared to a generics as a language feature:
+
+- We don't have to type assert arguments, but we'll almost always have to type assert return results (no different than raw List usage in Java)
+- There's nothing stopping us from passing the above filter function that expects an int to a Stream of strings, causing a runtime panic
+- The syntax doesn't require the somewhat lengthy description of type information
+- Only have one struct and set of methods to maintain
+
+If I were to use the system of generics Go has proposed, I would not be able to express that the methods Average and Sum only exist if the types are compatible with it - just like Java, I would either need more structs, or just leave it as is and document the expectation that the elements are convertible to float64.
+
+The point being that generics as a language feature is easier and offers compile time type checking, but there are always cases like my above Stream example that either have to be extra complicated to satisfy certain methods (more structs that are mostly a copy that have to be maintained), or have some methods that ignore the generic type and do their own thing.
+
+This is just one example, with a bit of trial and error, many simple techniques can be used to do generic programming on languages that don't support it as a feature - and sometimes those techniques are still useful anyway in combination with the language feature for corner cases the language doesn't support.
+
