@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= Simplifing "no data" applications
+
+== What is a "no data" application?
+
+There are a lot of data driven line of business applications that will never have a million rows before they get replaced by something else. I call these "no data" applications because they have so little data the database server will never require much optimization, if any. The default settings are good enough.
+
+Postgres can find any row out of a million on your corporate craptop in a relatively slow docker for windows container in 2 ms with any reasonable index. Oddly enough, it will get much faster performance in the cloud, where the vendor has undoubtedly optimized the database code for their particular infrastructure.
+
+See https://github.com/bantling/postgresql/tree/master/docs for an example of how to store all your docs in one table, along with an example of random data generation.
+
+== Typical knee-jerking
+
+I worked on such a project not too ago, where I asked how many records were expected to be inserted per year and got an answer of 10,000. Basic math dictates it would take a century to get a million rows, in practice it will never have more than a quarter million. I noted a couple of unnecessary decisions that were made:
+
+* Using Redis for caching
+* Using Elastic Search for a filter box
+
+If Postgres can retrieve rows in 2 ms, Redis can only save 2 ms if it took zero time. That is not a meaningful optimization. Elastic Search has a complex query language, which raises the following questions:
+
+* Doesn't it need a query planner to know how to find the records the query refers to?
+* Why would ES query planner be so much better than an SQL planner?
+* Why would ES storage of JSON be so much better than SQL storage?
+* Why would an ES index be so much better than an SQL index?
+* Why would ES perform any better then SQL?
+
+I'm sure ES has its place like every tool, but automatically using it just because you have a filter box makes no sense. For no data applications, hammering away on your Postgres database as the user types in the filter box will provide just as fast a response to the user.
+
+== Simplifying the database structure
+
+If you have so little data, why not simplify things as much as possible, such as:
+
+* Just use one table to store JSONB documents.
+* Use a string property named **type** to partition the rows into disparate types (eg customer, address, etc)
+* Use string properties named **id** and **parentId** for primary and foreign keys
+* Use a string property named **descriptor** to contain a series of space separated words for full text searching (eg, a filter box).
+* Postgres cannot have primary and foreign key constraints on JSONB properties, but it can extract the properties into separate columns on inserts and updates, and those columns can have the constraints.
+* Create a GIN index on the JSONB column using the jsonb_path_ops operator class. This limits the operator to only **@>**, but that operator allows equality comparisons on any number of properties located at different levels within the JSONB document in a single WHERE criteria.
+* Similarly, a separate column can extract the descriptor and convert it to a **ts_vector** for optimal storage. Create a GIN index on it for fast searching.
+* Extracting JSONB properties does not require a trigger - you can declare generated columns.
+
+== Sequential scans are faster than you think
+
+As stated above, the JSONB index is only capable of doing equality checks - if you need relational operators like less than or greater than, this index won't help. But that does not mean you need a separate index! If you try setting up a table as described, you may find you have to insert far more rows than you think to get Postgres to actually use your JSONB index, even after running the ANALYZE command on it.
+
+That's probably because:
+
+* Hard drives are far faster than they were 10 years ago
+* Filesystems are faster
+* Operating systems are faster
+* Postgres is faster
+* When Postgres has a combination of criteria that are indexed and criteria that are not, it first applies indexed criteria, limiting the sequential scan to the remaining criteria.
+
+That last point is especially important - in a lot of cases, you'll only have a single unindexed relational criteria with at least one indexed equality criteria, such that the relational criteria only applies to a small number of rows. Think of cases like searching for a child object where there are never more than a few child objects for any given parent.
+
+== Optimize based on real world problems
+
+Optimizations should be based on real world problems, not just copying whatever the last project did just because it did it. You may find at some point in time, based on actual data inserted and/or evolving requirements, that the single table is not performing as well as needed for some queries. There are a some things you can do to improve it:
+
+* If lack of relational indexes is an issue, you can add them. Such an index can refer to a specific property of JSONB, but would be used for all JSONB documents with the specified property name regardless of type.
+* If index size is an issue, you can partition the data, which involves creating a new table that derives from the main table, but only stores a single document type that is dominating the index.
+* Data can be migrated with a single query such as `INSERT INTO child_table SELECT doc FROM (DELETE FROM docs WHERE doc @> jsonb_build_object('type', 'doc_type') RETURNING doc) t`. The RETURNING clause effectively turns the DELETE into a SELECT, so that the records are deleted from the main table and inserted into the child table in one atomic operation.
+* Queries to the main table for that type can be automatically rewritten to query the child table, so application code does not need to change.
+* The child table will need its own indexes, they are not inherited from the parent.
+* A new idempotent script can be added that will create the child table, migrate the data, and rewrite child queries to query the child table.
+
+== Agile architecture
+
+There is no reason to add infrastructure up front just in case you need it - it can always be added later. It's not hard to add stuff like Redis or Elastic Search when needed, and only for what is needed. Infrastructure has costs just by their very existence, such as:
+
+* Yet another reason for a Jenkins job to fail. I saw two projects with the same problem of Jenkins being unable to clear the ES data. Could be as simple as a firewall issue, but takes time and requires IT involvement.
+* Code has to be written to actually use infrastructure.
+* Whether on premises on in the cloud, every deployed environment has to install and configure every piece of infrastructure, some of which is harder to setup based on the level of support for it and/or popularity.
+* New problems to solve. EG, if you add ES, you need to copy data to it, which is generally done via Logstash, which can only perform SELECT queries to find data to copy. What about deleted rows that need to be deleted from ES?
+* More anything = more bugs, more unit tests, more time, more money.
+
+A simple way to make your architecture more agile is to dedicate a single microservice to all external (non-memory) data access, whether it be your own project infrastructure, data provided by another department, or data provided by another company. Instead of each service executing SQL directly, services make REST calls to the data service. This has several advantages, such as:
+
+* Services only have to use HTTP, not a mixture of SQL, Redis, ES, and who knows what next week.
+* Simpifies migrating/copying data between infrastructure.
+* Simplifies evolving changes to ongoing concerns like authorization.
+* Only one language has to access data, so choose whatever language is best for this particular task, doesn't need to be the same language as other services.
+* You only need to check one project if you need to ask any questions about your data access:
+** What data is cached?
+** Are deleted rows correctly handled for ES?
+** What combination of infrastructure is being used for data type X?
+** What authorizations are required for data type X?
+** What are the set of queries for data type X?
+** What queries require sequential scans?
+
+At the same time, even if you use only Postgres, there are changes that can be made as needed:
+
+* Make child tables as described above.
+* Create Materialized Views as a simple ETL for reports that are too slow to run directly against the database, no need for time-sucking ETL tools or custom code. Use a simple cron job to refresh the materialized view as needed. A materialized view is a view that actually has storage to back it, selecting from it is like selecting from any other table. Refreshing the view wipes the storage and executes the query to repopulate it.
+* Don't underestimate Postgres! It has a lot of features like the RETURNING clause mentioned above that turns any INSERT, UPDATE, or DELETE into a SELECT. Chances are good that if you need to perform some new and funky kind of query that Postgres has something for it.
+
+== Conclusion
+
+I've seen a lot of just plain copying of what another project did with no real objective reasoning. The result isn't terrible, but often has extra unnecessary costs associated with it. A better approach is to start with the simplest possible solution, and evolve it as necessary based on real world observable problems and changing requirements. Extend agile thinking beyond just writing code and having sprints, and apply it to infrastructure as well.
