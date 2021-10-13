@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= Softwaare Needs Maintenance
+
+I've been writing Java webapps Since 2006, and have come to the conclusion somewhere along the line, we lost our way
+with how to write reasonably good web apps. Most of this is not specific to Java.
+
+When I started, there was no Maven, Gradle, JPA, REST, or the myriad JavaScript frameworks. They just hadn't been thought
+of yet. As I've been watching all the stuff coming out since, I feel it is all much ado about nothing - as in nothing to
+do with what I need from day to day.
+
+People flock to a new tool just because it's new without considering if they have the problem it solves. The most obvious
+example of this to me has to be Node.js. I remember when it first came out, that the original author talked all about
+trying to solve the 1K connections per second problem (I believe it was 1K, and that people talked about 10K later).
+I thought to myself at the time "It's great for someone to solve that problem, I never really thought about it as I don't
+have that problem. He's obviously done a lot of work, avoiding locks right down to investigating underlying C library code
+that uses locking and finding ways to avoid it."
+
+Since I don't have the problem it solves, I never bothered with it. Since it's release, it has become so popular that
+there are multiple JavaScript frameworks (such as Ember.js when using FastBoot, Sails, and Partial.js) that only work if
+you use a Node.js server. I seriously doubt very many people using node.js actually need 1K connections per second or more.
+So what is the impetus to switch to it from something else?
+
+Other times, frameworks are developed to solve problems that don't actually exist. A great example are persistence frameworks
+like JPA that translate between Java objects and SQL table rows. I just finished writing a basic "how to" webapp to
+demonstrate the basics of J2EE. I wrote a hand-coded DAO class that can create a table (the database is in memory, so
+the table has to be created on every run), insert, and update. The class is 198 lines, including whitespace and comments,
+compiling to 5K of binary code. I just checked, and the latest Hibernate JPA implementation is a 75MB download.
+When did we go from 5K to 75MB? Why do I need such a complex solution for such a simple problem?
+
+Following are some of the reasons for choosing JPA, and why they all fail:
+
+. JPA abstracts the choice of SQL vendor.
++
+Every reasonably complex solution I've seen using JPA in the real world has native queries in it. If you actually wanted
+to do something like add support for another SQL vendor or switch entirely, all those native queries would have to be
+revisited - while some of them may work as is, certainly some of them will not.
++
+. You can switch JPA implementations.
++
+Chances are, somewhere along the line you've been drinking vendor Kool-Aid such as vendor-specific extensions and/or
+configuration. Those extensions may not have an equivalent in another implementation.
++
+. JPA lets you abstract queries.
++
+Most JPA projects wind up using some combination of APIs for executing queries - CriteriaBuilder, JQL, native queries,
+and vendor-specific languages like HQL. Basically, every available API gets used.
+
+Compounding the above realities is that often people using JPA just litter their code with SQL queries all over the
+place rather than writing a database layer. They seem to think that JPA is the database layer. The end result is that
+it is highly unlikely a project can actually utilize any of the promises of JPA to do things like easily add support
+for another vendor or change implementations. The project winds up just as tied to a specific SQL vendor as if they had
+just written their own DAO classes and used all native queries in the first place.
+
+By contrast, writing your own DAO classes manually, starting with CRUD and adding specialized queries as needed, provides
+the following benefits:
+
+. All queries are located in the respective DAO classes
+. All queries are written in one language
+. There is only one API
+
+The end result is that adding/switching SQL vendors, or even using a totally different kind of database for some or all
+data (MongoDB, Redis, Neo4J, etc) becomes a real possibility and not just hand-waving wishful thinking.
+
+At other times, people just seem to lack good judgement somewhere along the line. I saw a project where someone spent a
+long time fighting to get incompatible things working together, when they could have just chosen another tool and been
+done far faster. Programmers seem to want to stick with one tool for a certain thing, and I hear people saying "we're an
+Angular shop". It's exactly that kind of always-use-the-same-tool thinking that leads to stubbornly sticking with the
+wrong tool for the wrong job. Programming is like everything else in life - sorry, there just isn't one end-all be-all
+tool. If there was, I wouldn't be writing this!
+
+Projects tend to start off with the ability to develop locally, then lose that somewhere along the line. It's not the
+sort of thing you had at Tuesday at 9:00 AM and lost it by 9:01 AM. Instead, it's something you were able to get working
+for the last new guy that got hired six months ago, but can't seem to get working for the new guy hired last week.
+Often, this boils down to configuration. Configuration starts off simple, and tends to mushroom into a rat's nest of
+files in different formats and locations, database entries, hard-coded values, assumed implicit values that are never
+formally stated anywhere, and a total lack of documentation.
+
+Then there's security, or more accurately, the lack thereof. Security isn't something you can drape a girl over in a
+commercial and make it look sexy, customers as a whole haven't historically demanded it, though there have always been
+some that have. Developers get all sorts of half-cocked solutions they find on Stack Overflow and other treasure troves
+of security misinformation, and whatever useless solutions co-workers provide. Developers treat security as just another
+"get 'er done" problem, so do not learn how to think though security the way they can think through an algorithm or
+debugging code.
+
+Case in point - securing passwords. Developers loathe seeing plain text passwords on disk. Unless, of course the
+password is in the form of a plain text SSL private key or SSH private key. You see, a password is just text you provide
+to get access to a resource. In the end, these SSL and SSH private keys are exactly that - text used to serve pages
+securely to a client or securely connect to a remote system. They are just a very long password, and not a password
+anyone ever has to enter with a keyboard. How are these very important private keys secured? Merely by file permissions.
+It is considered good enough to secure the file so that only the owner user and the root user can ever see them or read
+them. So why is that not good enough for other passwords used for tasks like accessing a database? The answer is that it
+is absolutely sufficient for any task that needs a password that cannot reasonably be entered by a user every time it is
+needed.
+
+The golden rule of encryption phrases is simple - the system either asks you for the encryption phrase every time, or
+the system hard-codes the encryption phrase. Given that an encryption phrase is plain text, hard-coding it is just as
+useless from a security standpoint as hard-coding the password it encrypts. It just adds another few minutes to an
+attacker's time to locate the hard-coded encryption key and use it to decrypt the password.
+
+Despite the above obvious logic, the idea of securing passwords is so pervasive that developers do things like create
+the Maven system for Java with the ability to encrypt your master password, which is then used to secure passwords for
+individual accesses like a particular database. When you encrypt your master password, Maven does not ask you for an
+encryption phrase. Therefore, it is hard-coded, providing absolutely no security value whatsoever. On the other hand,
+Maven also stores those passwords in a separate file in your home directory, which keeps them out of the code repository
+- this DOES add meaningful security.
+
+The crux of all these problems is the infatuation with doing things quicker rather than doing them well. The emphasis
+always shifts towards "my current stack is slowing me down, how can I develop faster?". I have come to the conclusion
+that the true answer to this question is to realize why development slows down over time. It is a question of software
+maintenance, not looking for yet another framework. When you buy a car, the manufacturer has a maintenance plan. At a
+minimum, you need to change the oil about every 8,000 KM. You don't always need to get all those inspections done, you
+only need to replace fluids when they are dirty enough to warrant it, etc.
+
+Unfortunately, there is no manufacturer to provide a software maintenance plan, that's something we have to do ourselves.
+The following items come to mind from the experience I've had:
+
+1. Use solutions that are as complex as necessary, no more, no less. Don't add extra stuff because one day someone might
+want a feature - just design for the features you know you need, and if you happen to know in advance of a feature that
+will be needed in the near future, then by all means account for it.
+
+2. Track all hacks and workarounds. Make them visible to management, add them to the bug tracking system. Have limits
+like there can never be more than 5 of these things before fixing at least 1 of them properly, so that the total count
+never exceeds 5. Fixing these hacks should be more important than developing new features - these WILL KILL your project
+design in the long run, period.
+
+3. To quote "Holmes on Homes" - use the right tool for the right job. Not every project needs a Java application server,
+not every project needs an ORM, not every project needs complex configuration.
+
+4. Keep configuration as simple as possible and practical - do not let it become a spaghetti nightmare. It may not be
+code, but it is still a design consideration.
+
+5. Ensure local development works. This could be accomplished via a Virtual Box VM that devs can run locally that contains
+the server processes needed, if the configuration is unavoidably complex and/or lengthy.
+
+6. Make security a priority from day one. Have a tool to scan for security problems and potential problems in the code
+base, and use it as part of the release process. Do not perform a release until the security problems are taken care of.
+Unfortunately, if you're not willing to delay a release to take care of security problems, you will never have any real
+security in your product.
+
+7. Have some useful metrics for your maintenance plan. For example, track the hours spent on implementing features and
+fixing bugs. If the maintenance plan is working, those numbers should not keep increasing over time, they should remain
+relatively flat. If they do start to climb, perhaps there is something missing from the maintenance plan that needs to
+be added, or something else needs to be tracked that is currently missed.
+
+Nobody seems to think software requires maintenance - just build, build, build. Just get things done, just meet this
+deadline, just make the client happy. It's a wall street attitude of screw tomorrow, get it done today, though many
+programmers don't recognise it or think of it concretely in this way. This thinking is why I have seen project after
+project that by the time it is 5 years old, it is a steaming pile of garbage. Initially, the project was good, if the
+customer wanted feature X, an estimate of 3 days actually took 2. But after 5 years of "get 'er done", so many hacks
+have been added and poor decisions made in the interest of time, that same feature X would be estimated at 10 days, and
+take 15 - everything takes several times longer than it used to, which means it costs the customer several times as much
+to have it developed. Software rarely gets rewritten, and projects that have devolved into a nightmare tend to just stay
+that way. The only silver lining is that they usually only devolve so far, simply because they can only get so crappy.
+
+There's no reason why software can't be maintained in such a way that this does not happen. I don't believe managers as
+a whole are lug nuts who can't understand why software needs to be maintained - rather the problem is us - we're just
+not coming up with maintenance plans and explaining to our managers why they are necessary for the long term health of
+the project.
+
+We need to start doing this as developers. This can be applied to existing projects, to "de-suck" them from garbage to
+a good design over time, one piece at a time. This is useful and valuable, as chances are that the project you're working
+on today is still going to be used by the company in 5 years, whether you're around or not. We should be stepping up an
+saying that this is important. If managers ignore a good explanation of the importance of these items, at least you tried
+instead of just letting it happen.

@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= Online Etiquette
+
+I read an article online about Amy Schumer recently and someone who tweeted that he had spent the night with her, and
+probably isn't the first guy who write that. She naturally got upset and things went from there. The problem really isn't
+what he said, as much as where he said it. If he had joked with her privately this way, or even with a few well-known
+friends at a small gathering, she might have just chimed in with something more like "you're just jealous 'cause I'm
+such a hot man-magnet, I have lovers lined up, while you just have a DVD and a sock." Which would lead to copious
+laughter by everyone present. Everyone would have known he wasn't serious.
+
+The problem is not that twitter is public, but that it is just text - there is no facial expression, no tone, no body
+language, nothing but words. This caused his tweet to just look like yet another jackass man treating women in an inferior
+way regarding sex in the same tired old double standard we are all so familiar with, along with less pay for the same job,
+and other perks of being female in our wonderfully egalitarian society.
+
+It turns out that being a dick online is extraordinarily easily, it basically comes naturally - just say comes into your
+head, and it can easily come out that way without even trying. I deal with this regularly at work when I write emails to
+people. I work a technical job, with other technical people. Like anything technical, people ask questions they should know
+the answer to, people make mistakes (so do I), people don't bother to read past the first line of my mail and respond
+accordingly, etc. So I find I need to inform someone "well, if you read my WHOLE email...", or "I already answered that
+two days ago", or explain something that should be obvious.
+
+As you can imagine, it's fairly easy to respond in a way where I'm really just trying to answer the question, but my text
+could be taken two ways - I'm just answering you, or I'm being sarcastic because your question is stupid. If I showed the
+same text to 10 people who didn't know me or anyone involved, half would think I'm being a dick, and half would think I'm
+not. So I tend to following a few rules for everything I send to people:
+
+. Just use plain ordinary language, like I'm talking to them in person.
+. No repeated exclamation or question marks, or words in all caps, or any other sort of hyperbolic expression. This is
+confusing, people are unsure if you're upset, or just enjoy exaggeration, like maybe you wave your hands around a lot when
+you talk or something.
+. If there is a particularly important detail to call attention to (like "is" versus "is not" in two different sentences),
+I bold the important phrases. This provides emphasis that people generally identify the same way you would if you saw it
+in a printed book - just hiliting the important bit of the sentence. Technical people are used to this anyway when reading
+articles online.
+. Re-read the email. This helps to avoid saying something technically wrong, make sure my sentences don't have an obvious
+spelling or grammatical error, and ensure the language sounds like I want it to.
+. If in doubt about how it'll come across, add a :) to the end. Sometimes I just don't see any other way to make sure
+the language sounds like I'm just providing a friendly explanation. Fortunately, everyone recognizes this as an indication
+that I mean what I say in a friendly voice. I have talked to people in Romania, Germany, Bulgaria, UK, US, India, and
+Canada at my current position. The smiley emoticon cuts across all the languages and cultural differences on the web,
+everyone gets it.
+
+While the above may not be rocket science, it is something we need to teach people, especially youngsters in school.
+Today's precious little ones will grow up doing almost all of their communication online, where it easy to tweet
+something in a few seconds, and regret it later. There's a lot to be said about point 4 above - re-reading before hitting
+the button that says "send", "tweet", "post", whatever. Sure, you can delete a tweet or facebook post, but like the article
+with Amy Schumer, the story still exists, and still contains the original tweeted text. There really is no delete on the
+internet, no undo, no way to truly wind backwards to the point before you said it. Once it's out there, it's out there for
+good, and takes on a life of its' own.

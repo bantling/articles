@@ -1,11 +1,20 @@
-Using Postgres CTEs for data generation
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
 
-Postgres supports Common Table Expressions (CTEs), which can be used to combine multiple queries together to perform multiple operations that are related in some way.
+= Using Postgres CTEs for data generation
 
-One possible use is to generate data to insert. If you only have one table to insert into, then a simple INSERT/SELECT statement will do. But if you have a parent/child relationship, then you need to use parent ids when inserting the children. Things get complicated if you want multiple children per parent, and want some randomized data.
+Postgres supports Common Table Expressions (CTEs), which can be used to combine multiple queries together to perform
+multiple operations that are related in some way.
 
-The first issue to consider for generating parent/child data is that we need what I will call a "unique cross product". Suppose we perform a cartesian cross product query using the generate_series function, which generates a series of rows containing a contiguous range of integers. We'll combine this function with gen_random_uuid to demonstrate the problem:
+One possible use is to generate data to insert. If you only have one table to insert into, then a simple INSERT/SELECT
+statement will do. But if you have a parent/child relationship, then you need to use parent ids when inserting the children.
+Things get complicated if you want multiple children per parent, and want some randomized data.
 
+The first issue to consider for generating parent/child data is that we need what I will call a "unique cross product".
+Suppose we perform a cartesian cross product query using the generate_series function, which generates a series of rows
+containing a contiguous range of integers. We'll combine this function with gen_random_uuid to demonstrate the problem:
+
+....
 CREATE EXTENSION pgcrypto;
 SELECT parentId, childId
   FROM (SELECT gen_random_uuid() parentId FROM generate_series(1, 2)) t1,
@@ -19,9 +28,14 @@ SELECT parentId, childId
  ece78bf0-0927-4712-86ed-feecfafc8aca | 365ec82a-f773-48aa-986f-d2e29a1846ae
  ece78bf0-0927-4712-86ed-feecfafc8aca | 16ae2723-c088-43ab-855f-482d6d82cf2a
  ece78bf0-0927-4712-86ed-feecfafc8aca | 5fd7e5d5-a4fe-4fac-a5bb-bcf7a071e8cd
+....
 
-We asked for 2 parents multiplied by 3 children = 6 rows. There is an obvious problem here: the parentId values are unique, but the childIds are not - this is fine for inserting the first parent/child, but inserting the second parent/child will fail with primary key errors for the children. The above cartesian cross product is exactly what you'd expect, but by using CTEs in a very specific way, we can generate a unique cross product, where the childIds are generated for each parentId:
+We asked for 2 parents multiplied by 3 children = 6 rows. There is an obvious problem here: the parentId values are unique,
+but the childIds are not - this is fine for inserting the first parent/child, but inserting the second parent/child will
+fail with primary key errors for the children. The above cartesian cross product is exactly what you'd expect, but by
+using CTEs in a very specific way, we can generate a unique cross product, where the childIds are generated for each parentId:
 
+....
 WITH parentData(parentId) AS (
   SELECT gen_random_uuid() parentId,
          generate_series(1, 2)
@@ -43,18 +57,25 @@ SELECT parentId, childId
  98485270-d109-4031-95a6-04e4e6e1f8ba | cdbe2cf3-40dd-4b12-b26e-efe4cdde6b5d
  98485270-d109-4031-95a6-04e4e6e1f8ba | a2ebe645-c15b-4546-8315-fbad7c0a1347
  98485270-d109-4031-95a6-04e4e6e1f8ba | d5c5714b-7237-45e9-bf28-6ea0a0e5b695
+....
 
 The query structure is as follows:
-1. CTE #1 - WITH parentData(parentId) AS ...
-2. CTE #2 - childData(parentId, childId, ...) AS...
-3. Main Query - SELECT parentId, childId, ...
+
+. CTE #1 - WITH parentData(parentId) AS ...
+. CTE #2 - childData(parentId, childId, ...) AS...
+. Main Query - SELECT parentId, childId, ...
 
 The secret sauce for generating new child ids for each parent is:
-1. CTE #2 depends on CTE #1 in FROM clause
-2. Main query only depends on CTE #2 - it has no reference to CTE #1
 
-There are some variations that will still produce a unique cross product, just be aware that a slight change can wind up returning the usual cartesian cross product that we don't want. So far the above queries do not insert anything. We can make them into Data Modifying CTEs (DMCTEs) by taking advantage of the fact that any DML query in Postgres becomes a pseudo-select query by adding a RETURNING clause:
+. CTE #2 depends on CTE #1 in FROM clause
+. Main query only depends on CTE #2 - it has no reference to CTE #1
 
+There are some variations that will still produce a unique cross product, just be aware that a slight change can wind up
+returning the usual cartesian cross product that we don't want. So far the above queries do not insert anything. We can
+make them into Data Modifying CTEs (DMCTEs) by taking advantage of the fact that any DML query in Postgres becomes a
+pseudo-select query by adding a RETURNING clause:
+
+....
 CREATE TABLE parent(id UUID PRIMARY KEY);
 CREATE TABLE child(
   id UUID PRIMARY KEY,
@@ -76,9 +97,13 @@ childData(parentId, childId) AS (
 INSERT INTO child(parentId, id)
 SELECT parentId, childId
   FROM childData;
+....
   
-For demonstration purposes, we don't need an index for the foreign key. Notice how the parentData CTE has the generate_series() call moved into the FROM clause - this is neccessary since we can cannot select extra columns not referenced by the insert. Let's check the results:
+For demonstration purposes, we don't need an index for the foreign key. Notice how the parentData CTE has the generate_series()
+call moved into the FROM clause - this is neccessary since we can cannot select extra columns not referenced by the insert.
+Let's check the results:
 
+....
 select * from parent;
                   id                  
 --------------------------------------
@@ -94,11 +119,16 @@ select parentId, id from child;
  6e5e79f6-38c4-48b5-b83f-ec3f5963ec6f | 52ca5e74-7cd4-4857-b55d-53c734652d3b
  6e5e79f6-38c4-48b5-b83f-ec3f5963ec6f | 9cb4ab27-eaa0-43de-8b22-8f9ef26a1896
  6e5e79f6-38c4-48b5-b83f-ec3f5963ec6f | a01e6a5b-3aa9-4c9c-aea6-0cf3c4405545
+....
 
-One important aspect of CTEs is they are atomic - either the whole query succeeds or the whole query fails. This means we can use CTEs instead of more complex transactional code that is easy to get wrong, at the expense of writng a more complex query that might be a bit harder for noobs to understand.
+One important aspect of CTEs is they are atomic - either the whole query succeeds or the whole query fails. This means we
+can use CTEs instead of more complex transactional code that is easy to get wrong, at the expense of writng a more complex
+query that might be a bit harder for noobs to understand.
 
-If you were reading carefully, you'll notice I mentioned above that the returning clause is a pseudo-select query. One limitation is we cannot use a returning clause in a subselect:
+If you were reading carefully, you'll notice I mentioned above that the returning clause is a pseudo-select query. One
+limitation is we cannot use a returning clause in a subselect:
 
+....
 SELECT id
   FROM (
          INSERT INTO parent(id)
@@ -109,9 +139,12 @@ SELECT id
 
 ERROR:  syntax error at or near "INTO"
 LINE 3:          INSERT INTO parent(id)
+....
 
-This means our DMCTEs cannot try to wrap a returning clause to try and select more data than that provided by the returning clause. However, a returning clause is not limited to returning only columns from the inserted/updated rows:
+This means our DMCTEs cannot try to wrap a returning clause to try and select more data than that provided by the returning clause.
+However, a returning clause is not limited to returning only columns from the inserted/updated rows:
 
+....
 INSERT INTO parent(id)
 SELECT parentId
   FROM (SELECT gen_random_uuid() parentId FROM generate_series(1, 2)) t
@@ -121,13 +154,18 @@ RETURNING id, 1, 'abc';
 --------------------------------------+----------+----------
  1111ace9-47f3-4e77-aa78-b0a588120172 |        1 | abc
  2a700e56-3f2c-480e-8169-2b326d040ee2 |        1 | abc
+....
 
-Let's say we want to vary the number of children. EG, we have customer parents and child addresses, and we want to vary how many addresses each customer has to be more realistic - eg, some customers may have only a primary address, others may have primary and mailing addresses, etc. We'll assume the following:
-1. Three kinds of addresses exist: primary (P), mailing (M), and billing (B)
-2. There can be at most one of each type
+Let's say we want to vary the number of children. EG, we have customer parents and child addresses, and we want to vary how
+many addresses each customer has to be more realistic - eg, some customers may have only a primary address, others may have
+primary and mailing addresses, etc. We'll assume the following:
+
+. Three kinds of addresses exist: primary (P), mailing (M), and billing (B)
+. There can be at most one of each type
 
 First, let's see how to vary the number of children in a CTE:
 
+....
 WITH parentData(parentId, numChildren) AS (
   SELECT gen_random_uuid(),
          trunc(random() * 3)::int + 1 numChildren,
@@ -148,13 +186,16 @@ SELECT parentId, childId
  cae92bf7-f335-44a0-ae9b-d11fea79ec9d | 01387ba7-8850-4c15-9cda-793db0e1d45d
  cae92bf7-f335-44a0-ae9b-d11fea79ec9d | 12e2fd74-b7f3-4bb8-913a-341fe491994d
  c04f428b-e6a2-4faf-93b1-d99526198d6d | 170500c9-a581-416d-b4c2-51329ac83001
+....
          
 Varying the number of children just requires two things:
-1. CTE #1 uses random in the SELECT expression to guarantee the random number varies across parent ids
-2. CTE #2 uses the random number from CTE #1 as the upper bound in the generate_series() function call instead of a hard-coded value 
+
+. CTE #1 uses random in the SELECT expression to guarantee the random number varies across parent ids
+. CTE #2 uses the random number from CTE #1 as the upper bound in the generate_series() function call instead of a hard-coded value 
 
 To generate more realistic customer data, we can vary the data by choosing randomly from hard-coded arrays:
 
+....
 SELECT firstNames[trunc(random() * array_length(firstNames, 1))::int + 1]
   FROM (SELECT array['John', 'Mary', 'Ken', 'Suzy'] firstNames) t,
        generate_series(1, 5);
@@ -166,11 +207,18 @@ SELECT firstNames[trunc(random() * array_length(firstNames, 1))::int + 1]
  John
  Suzy
  Ken
+....
 
-By using array_length, we can add more values to the array without changing the select clause. Unlike the generate_series function, Postgres forces the array to be a subselect. Arrays are one-based, and accessing any subscript outside the closed range [1, length] will return null.
+By using array_length, we can add more values to the array without changing the select clause. Unlike the generate_series function,
+Postgres forces the array to be a subselect. Arrays are one-based, and accessing any subscript outside the closed range [1, length]
+will return null.
 
-We may want data that consists of multiple pieces of information that need to be related. For example, we might want to randomly choose address data from the US and Canada, without choosing non-sensical data like a Canadian province and the US country. This can be done by using a three dimensional array. In this case, it is easier to just hard-code the number of array elements instead of using array_length:
+We may want data that consists of multiple pieces of information that need to be related. For example, we might want to
+randomly choose address data from the US and Canada, without choosing non-sensical data like a Canadian province and the
+US country. This can be done by using a three dimensional array. In this case, it is easier to just hard-code the number
+of array elements instead of using array_length:
 
+....
 SELECT addressData[cIdx][aIdx][1] line,
        addressData[cIdx][aIdx][2] city,
        addressData[cIdx][aIdx][3] region,
@@ -197,9 +245,13 @@ SELECT addressData[cIdx][aIdx][1] line,
  123 Sesame St       | New York      | New York     | 10009   | USA
  19274 US Highway 85 | Belle Fourche | South Dakota | 57717   | USA
  56 Sparks St        | Ottawa        | Ontario      | Canada  | K1P 5A9
+....
 
-The format function is a printf like function that can be used to generate a JSON string. We can combine the techniques used so far and use the format function to generate random customer and address JSON strings with varying numbers of addresses per customer:
+The format function is a printf like function that can be used to generate a JSON string. We can combine the techniques
+used so far and use the format function to generate random customer and address JSON strings with varying numbers of
+addresses per customer:
 
+....
 DROP TABLE parent;
 DROP TABLE child;
 CREATE TABLE customer(JSONB payload);
@@ -287,15 +339,21 @@ SELECT * FROM address;
  {"id": "1d6709c9-bc2b-4ff0-8b18-94f33827d6e1", "city": "New York", "line": "123 Sesame St", "type": "P", "region": "New York", "country": "USA", "customerId": "01c268c4-6101-48f4-ae7e-236386bede68", "postalCode": "10009"}
  {"id": "7ccb0a50-8175-483b-a400-1aa8e63f0312", "city": "Ottawa", "line": "56 Sparks St", "type": "B", "region": "Ontario", "country": "K1P 5A9", "customerId": "01c268c4-6101-48f4-ae7e-236386bede68", "postalCode": "Canada"}
  {"id": "d55b5747-6513-4c8d-b9e4-a73566a889a1", "city": "New York", "line": "123 Sesame St", "type": "M", "region": "New York", "country": "USA", "customerId": "01c268c4-6101-48f4-ae7e-236386bede68", "postalCode": "10009"}
+....
 
 The DMCTEs can be put into a script that gets optionally copied into a docker container by a build argument in a Dockerfile:
 
+....
 FROM mdillon/postgis:11-alpine
 # Build arg to specify additional scripts to add
 ARG extra_scripts=
 # Copy output scripts
 COPY *.sql ${extra_scripts} /docker-entrypoint-initdb.d/
+....
 
-If the build arg is not specified, then the extra_scripts will default to the empty string and only "*.sql" gets copied. The build arg could simply refer to "*.sql" in a different directory.
+If the build arg is not specified, then the extra_scripts will default to the empty string and only .sql files gets copied.
+The build arg could simply refer to all .sql in a different directory.
 
-By combing DMCTEs with a handful of functions, we can generate reasonable random data for purposes such as local development and testing, and have different seed data scripts per environment. If you have some other method for generating testing data, or other variations of DMCTEs than those presented, please share them.
+By combing DMCTEs with a handful of functions, we can generate reasonable random data for purposes such as local development
+and testing, and have different seed data scripts per environment. If you have some other method for generating testing
+data, or other variations of DMCTEs than those presented, please share them.
