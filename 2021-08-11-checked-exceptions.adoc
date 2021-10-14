@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= Programming BS: Checked Exceptions
+
+== The Problem
+
+I have always hated being forced to catch an exception, largely because:
+
+* Remember that code you wrote that brings the database backup, adds disk space or memory, grants the correct file privileges
+as root? Neither do I. If a real problem occurs that is beyond the control of your code, then by definition, you cannot
+change the outcome. So what's the point of forcing you to handle it?
+* Just because something is a problem for you, doesn't mean it's a problem for me. EG, in Java JNI (basically a key/value store)
+if you lookup a value for a given key, but the key does not exist, it throws an exception. It seems the designers of JNI
+assumed it is the only source of information for a given value. What if it isn't?
+* Since there is nothing you can really do in response to an exception, they wind up being re-thrown up to the top, where
+a web service returns an http 500 code, a gui displays a "there's a problem we can't fix" dialog to the user.
+* If an interface method does not declare any checked exception type, the implementation cannot throw any checked exceptions.
+But what if the implementation has to make calls that throw checked exceptions?
+* Sometimes you're forced to use exception handling as an if/then statement
+* Sometimes you need to have nested try/catch blocks, which can be hard to reason about, and are invariably not unit tested
+for each catch statement.
+
+== Strategies
+
+If you look at Java code as an example, people use various strategies to try to deal with checked exceptions, such as:
+
+* Write a MyLibraryException class, which every method that throws a checked exception uses. If the library code has to deal
+with any other kind of exception, it wraps it in MyLibraryException.
+* Rethrow checked exceptions as RuntimeException.
+* In cases such as Integer.valueOf(String) you need to catch the NumberFormatException to handle strings that are not integers,
+unless you can guarantee the strings are always integers.
+
+== Results
+
+This leads to various problematic results:
+
+* If you use several libraries (or libraries that depend on libraries), even if you could actually do something to handle
+the root problem, it may be buried in an unknowable number of exception wrapper classes from different libraries in the
+stack trace.
+* In a program of any real complexity and non-trivial dependency chain, it is simply impossible to use a one size fits all
+exception handling coding pattern. You have to use multiple strategies.
+* Different developers - like every coding issue - have their own way of dealing with this, which they may argue is "the best".
+Good luck getting consistent exception handling across a decent size code base and team turnover.
+
+== One of the main reasons I like Go
+
+At the the end of the day, this is why I like the Go usage of panic and defer in place of checked exceptions. It has some
+decided advantages:
+
+* You are never forced to catch anything - in fact, there isn't even a catch statement.
+* Defer isn't limited to exception handling, it can also be used to simply ensure any number of resources are closed before
+the scope exits.
+* You can introduce scopes with inline functions to control what code a defer statement applies to - I find this particularly
+useful in unit testing, where I want a single test function to verify that each of the panics in the function being tested
+occur only when they are supposed to.
+
+== What about other languages?
+
+What if you're using a language like Java? I think a good solution is to write a Try class that has various static methods,
+each of which represents a particular situation. The method names should be descriptive enough to not have to constantly
+read the docs once you get the hang of it.
+
+If you need a nested try/catch situation, it becomes nested method calls. Basically, it offers a functional solution to
+the problem, and is a particularly good usage of lambdas. I find well-written functional code is almost always more concise,
+easier to read, and easier to test (because it has less context, and is generally free from the "banana gorilla jungle" problem).
+
+== Some example Try class methods
+
+First, we need some functional interfaces (interfaces compatible with lambdas):
+
+....
+/**
+ * A functional interface for executing logic with no arguments, a side effect.
+ */
+@FunctionalInterface
+public interface TryTo {
+    void execute() throws Throwable;
+}
+
+/**
+ * A version of {@link Supplier} that allows throwing any kind of exception.
+ * @param <T> the type to return
+ */
+@FunctionalInterface
+public interface TrySupplier<T> {
+    T get() throws Throwable;
+}
+....
+
+The Try class can then utilize the above functional interfaces:
+
+....
+public final class Try {
+    // Execute a function, and if it throws, wrap it in RuntimeException
+    public static void to(
+        final TryTo fn
+    ) {
+        Objects.requireNonNull(fn, "fn");
+
+        try {
+            fn.execute();
+        } catch (final RuntimeException fne) {
+            throw fne;
+        } catch (final Throwable fnt) {
+            throw new RuntimeException(fnt);
+        }
+    }
+
+    /**
+     * Combine a number of TryTo instances into a single TryTo that executes each instance in turn.
+     * When the combined TryTo is executed, if any instance throws an exception, the remaining instances are not executed.
+     * 
+     * @param first first instance
+     * @param more additional instances
+     * @return joined instance
+     */
+    public static TryTo all(
+        final TryTo first,
+        final TryTo... more
+    ) {
+        Objects.requireNonNull(first, "first");
+        Objects.requireNonNull(more, "more");
+
+        final List<TryTo> allFuncs = Helpers.toCollectionOf(new LinkedList<>(), first, more);
+        allFuncs.forEach(Objects::requireNonNull);
+
+        return () -> {
+            for (final TryTo func : allFuncs) {
+                func.execute();
+            }
+        };
+    }
+
+    /**
+     * Return a value that may be null, or throw an unchecked exception
+     * 
+     * @param <T> type to return
+     * @param fn function that may throw an exception
+     * @return possibly null source result
+     * @throws RuntimeException if an exception occurs
+     */
+    public static <T> T get(
+        final TrySupplier<T> fn
+    ) {
+        Objects.requireNonNull(fn, "fn");
+
+        try {
+            return fn.get();
+        } catch (final RuntimeException e) {
+            throw e;
+        } catch (final Throwable t) {
+            throw new RuntimeException(t);
+        }
+    }
+
+    /**
+     * Return a value that cannot be null, or throw an unchecked exception
+     * 
+     * @param <T> type to return
+     * @param fn function that may throw an exception
+     * @param defaultValue default non-null value 
+     * @return result from fn or defaultValue if fn returns null
+     * @throws NullPointerException if defaultValue is null
+     * @throws RuntimeException if an exception occurs
+     */
+    public static <T> T getDefault(
+        final TrySupplier<T> fn,
+        final T defaultValue
+    ) {
+        Objects.requireNonNull(fn, "fn");
+        Objects.requireNonNull(defaultValue, "defaultValue");
+
+        try {
+            return Optional.ofNullable(fn.get()).orElse(defaultValue);
+        } catch (final RuntimeException e) {
+            throw e;
+        } catch (final Throwable t) {
+            throw new RuntimeException(t);
+        }
+    }
+}
+....
+
+And here are some actual code excerpts that call some of the above methods:
+
+....
+    // This method is part of a class that abstracts reading and writing fields of a Java class
+
+    /**
+     * set the value of the field on the given instance
+     * 
+     * @param instance the instance to set the value of
+     * @param value the value to set
+     */
+    public void set(final Object instance, final Object value) {
+        Try.to(() -> setter.invoke(instance, value));
+    }
+
+
+    // The next two methods are part of a class that adapts a JDBC ResultSet into an Iterator.
+    // The class is also AutoCloseable since a ResultSet needs to be closed.
+
+    public boolean hasNext() {
+        // Allow user to call hasNext multiple times in a row
+        if (mode == IterationMode.HAS_NEXT) {
+            return true;
+        }
+
+        if (mode == IterationMode.DOES_NOT_HAVE_NEXT) {
+            return false;
+        }
+
+        final boolean hasNext = Try.get(rs::next).booleanValue();
+        mode = hasNext ? IterationMode.HAS_NEXT : IterationMode.DOES_NOT_HAVE_NEXT;
+        return hasNext;
+    }
+
+    // Close the result set and statement
+    @Override
+    public void close() {
+        Try.to(
+            Try.all(
+                rs::close,
+                stmt::close
+            )
+        );
+    }
+....
+
+== Conclusion
+
+When I have a choice of language, I would use Go. Not just because of panic/defer, but also because the Go community espouses
+simplicity, less code, small libraries and generally eschews large frameworks.
+
+If I have to use Java but have a choice of how, I would choose to use a Try class, and not use large frameworks like Spring
+and JPA - I just fail to see how it is a "micro" service when such huge amounts of code and memory are being used.
+Besides, if a micro service only has a couple thousand lines of code with a handful of queries, why do you need those large frameworks anyway?
