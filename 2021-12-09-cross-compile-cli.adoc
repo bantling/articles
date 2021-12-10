@@ -1,0 +1,117 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+:c_plus_plus: C++
+:g_plus_plus: g++
+
+= Cross compiling a {c_plus_plus} CLI application
+
+See https://github.com/bantling/tools/tree/master/cross-compile/hello-cli
+
+== Prepare for disappointment
+
+You'd think that as you're reading this that somebody, somewhere is busy cross compiling GCC, or building the latest
+LLVM with all the backends. You'd think by now, after all these years, it would be an easy process. You'd think that
+after using Go, that there would be a simple command in LLVM to tell you what all targets are available.
+
+But alas, you'd be cataclysmically wrong! It is easy to compile the latest GCC for your host, but cross compiling it
+still requires voodoo magic. Even if you follow exact directions online with the exact specified versions of everything,
+it will almost certainly not work. At least it only takes maybe an hour to fail. While it is easy to compile LLVM, it
+is a marathon 8 hour or so compile, only to find a small subset of available backends exist. The windows backend still
+requires microsoft tools to compile, the os x and freebsd backends are not present.
+
+I can only assume the Go team went to hell in a hand basket to make it trivially easy to compile Go to whatever target
+platform you want by just adding a couple of variables indicating the OS and architecture (eg Linux ARM). They must
+subscribe to forums and ask a lot of questions about why the latest LLVM doesn't do this or that as expected.
+
+From the experience I had, I would suggest in all honesty, if you want to cross compile to various target platforms, use
+Go. I haven't tried it, but apparently Rust makes it equally easy. So if you have a choice of language, use one of those.
+
+== Some good options
+
+So what if you're stuck using {c_plus_plus}? Well, naturally there are others who have done the hard work, and as you'd expect, you
+can find docker containers. The multiarch/cross-build container provides GCC compilers that target Linux (x86, arm, mips,
+powerpc), Windows x86, OS X x86. I also wanted to target FreeBSD just to add something that would be more of a challenge.
+I found a docker container for it, but it uses a really old GCC that only supports {c_plus_plus} 98.
+
+Popular Linux distros will likely provide a MinGW group of packages. They provide cross compilers for Windows x86
+including a resource compiler so you can add a custom icon and other things Windows expects to find in compiled resources.
+You can always use a VM to compile code for any target of interest, so I use that for FreeBSD. I used a technique I'll call
+two way SSH that works as follows:
+
+* Linux installs an SSH cert into VM so make can invoke the VM compiler without a password.
+* The VM installs an SSH cert into the Linux host so it can use fuse to mount the host OS filesystem via ssh, so the VM compiler can
+read sources and compile objects directly on the host. If you run make a second time in the VM without changing anything,
+make correctly reports "Nothing to do".
+
+The reason for using this strategy is twofold:
+
+* The FreeBSD provided VirtualBox Guest Additions are flaky, just because a dir or file is listed, does not mean you can
+actually read the contents of it
+* It should work on any kind of virtualization (eg, QEMU)
+
+So here are the best options I found to compile on Linux for my targets of interest:
+
+* Linux: OS packages, multiarch/cross-build
+* Windows: MinGW OS packages, multiarch/cross-build
+* OS X: multiarch/cross-build
+* FreeBSD: A FreeBSD VM using two way SSH
+
+This yields different strategies depending on your chosen platforms:
+
+* Linux and Windows: use OS packages and MinGW OS packages
+* OS X with zero or more of Linux and Windows: multiarch/cross-build
+* Any other systems: a VM with two way ssh
+
+== A reuseable Makefile
+
+I came up with a Makefile that can be easily modified into whatever is needed for a given platform, it just covers what I consider the basics:
+
+* Separate include and src dirs
+* include/all and src/all for code that compiles the same on all targets 
+* include/<platform> and src/<platform> dirs for platform specific code
+* auto discovers newly created .h and .cpp files as they are added
+* {g_plus_plus} generates dependencies in the form of .d files that contain a simple make rule, so that once the initial
+  compile is done, further compiles only have to compile the changed files and files that depend on them. 
+* build debug and release versions
+* separate Makefiles for each platform, with one top level Makefile that calls all of them in a specified order
+* Makefiles have a lot of variables declared at the top, and a vars target to display them
+* If new variables are added to a platform Makefile, run the vars-generate target to regenerate the set of values printed by the vars target
+* Common directory structure for all targets:
+** make/<platform>/build/(debug, release)/(all, <platform>)/*.(o,d)
+** make/<platform>/build/app/(debug, release)/(app, any other files required to run it)
+
+There are only minor differences between these Makefiles, and only for variables:
+
+* PLATFORM_LC = linux, windows, osx, freebsd
+* APP_NAME = app on linux, osx, freebsd, app.exe on windows
+* DEBUG_APP_OPTS: empty on linux, osx, freebsd, -static on windows
+* RELEASE_APP_OPTS:
+** linux: -s
+** windows: -static -s
+** osx: empty
+** freebsd: -s
+
+I purposely set out to make the smallest possible differences between them, and that is the best I could do for a simple
+cli application. A gui app would generally have more differences.
+
+The -static app option for windows makes a static binary, so no dlls have to be copied, only the exe and any data files
+it needs. The os x compiler does not need -static, not sure if I'm just lucky and the expected {c_plus_plus} library version
+just happens to match, or if os x always compiles statically. The os x compiler will not accept -s to strip uncalled
+functions, it causes an error. 
+
+The top level Makefile uses docker to compile for linux, windows, and os x, and assumes a FreeBSD VM is running that it
+can invoke via ssh on a port number stored in a variable (5222, chosen as the digit 5 is closest to the letter F in
+appearance). This Makefile auto discovers make/<platform> subdirectores for every operation except compiling. 
+
+== Conclusion
+
+Using a single docker container for linux, windows, and osx goes a long way to making this easy. The great thing about
+how the FreeBSD VM works via ssh, is that it is a very general solution that should work for pretty much any more niche OS you need
+to support, with any virtualization you choose to use.
+
+I found this project frustrating initially, until I just gave upon cross compiling gcc/LLVM. After that, it was kind of fun!
+The github project referenced at the top contains all the gory details of every Makefile variable and target, as well as
+how to configure FreeBSD 13.0 to mount an SSH filesystem at boot, so all you have to do is fire it up and wait for the
+login prompt before running make.
+ 
+Enjoy!
