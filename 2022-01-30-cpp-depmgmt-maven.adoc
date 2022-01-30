@@ -1,0 +1,72 @@
+:doctype: article
+:c_plus_plus: C++
+
+= Dependency management for {c_plus_plus} using Maven
+
+See https://github.com/bantling/tools/tree/master/depmgmt
+
+== Choice of Maven
+
+I tried using Conan, and found it overall good, but a bit disappointing. I used Conan on a project that needed
+development for a relatively short time, then it would sit for years with very little development. At some point after
+the development sprint was done, the Jenkins builds started to fail because IT upgraded the server, part of which was
+upgrading Python applications that are installed via pip, which includes Conan. Turns out the upgraded Conan no longer
+worked with the build files we had.
+
+Part of the problem was I had originally set it up so that Conan was only for dependencies - while it had the ability to
+generate CMake recipes, I felt it would more than likely not work out for some unforseeable reason. Somebody else on the
+team was the kind of guy who liked to go full bore all poker chips in on a tool, and thought it was better to have a one
+button solution that can pull deps, generate CMake files, use CMake to generate Makefiles and run them, producing an
+artifact in one command.
+
+It worked for awhile, then didn't (after he was gone, of course!). He is a good developer, and a smart guy, but I guess
+did not at the time fully appreciate how such decisions can fail in the long run. In the end, it would have been better
+if he had left it as is. Nobody was clamouring for a better solution as far as I was aware.
+
+So I decided on a future round with C++ on another project to to give Maven a try, because:
+
+* I know Maven has native archives
+* I really only need Maven for dependency management, I don't need to tie it into the compile process (let Make do that)
+* I figured Maven should really be capable of being a general build tool that can build anything (like Ant or Make)
+
+With some research (and the requisite swearing), I found I could use the following facilities of Maven to create a very
+simple system for managing dependencies for any arbitrary purpose (in this case C++ libraries and executables):
+
+* pom packaging type, which essentially can build anything, but you have to explicitly describe most steps
+* a minimal ~/.m2/settings.xml file that just provides the id, username, and password of a repo to deploy to
+* declare dependencies pom as usual with type and scope added (don't usually need these)
+* declare a profile in pom to specify value of ${project.build.directory} var for usage elsewhere
+* declare in pom where to unpack dependencies
+* declare in pom how to compile code (use make)
+* declare in pom how to package files (use assembly.xml to declare what gets zipped up)
+* declare in pom that we want to be able to deploy
+* declare in pom the server id and url to deploy to (the url could probably be moved to settings.xml)
+
+Obviously, the pom.xml contains stuff you don't normally have to provide, but is actually still smaller than your
+average over bloated Java project pom.xml with 150 transitive dependencies, and quite straight forward to understand.
+
+I really only found one small minor gotcha: although the assembly plugin is capable of using better compression formats
+like bzip and gzip, the dependency plugin only allows you to say it is a zip format. Since it is just a tiny amount of
+code that is being zipped, it wouldn't matter anyway. Yes, the jar packaging type loads dependencies via jar files, but
+in terms of compression, a jar file is literally a zip file with a different extension - you could use Windows Explorer
+to compress a folder of java compiled code into a zip, rename it .jar, and execute it with java -jar.
+
+== Conclusion
+
+I'm quite happy with the result, the usual maven commands can be used to grab dependencies, compile, clean, and deploy.
+I would definitely use Maven for dependency management for C and C++ projects, or really any other situation where you
+need it, and it isn't already provided for whatever reason.
+
+Maven is a really good general dependency manager, packager and deployment tool for pretty much anything you want to
+apply a version to, and shove into an artifact repository.
+
+It's also extremely simple to test the small app that depends on a library that in turn depends on another library. Just
+run a single short loop in bash:
+
+....
+for i in cpp3 cpp2 cpp1;do ( cd $i && mvn deploy ); done
+....
+
+That's it - each project pulls in any needed deps, gets compiled, packaged, and deployed to nexus in one command. 
+The README.adoc at the url provided at the beginning of this article also provides a few simple commands to get
+Nexus 3 running in docker, and ready to deploy to.
