@@ -1,0 +1,245 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= SQL has always been a good solution
+
+I recently read an article at https://www.infoworld.com/article/3711272/9-reasons-sql-has-got-to-go.html suggesting
+that SQL has "got to go". This article is misguided, and the claims are patently false. I'll discuss the points the
+original author made, and why I believe they are off the mark.
+
+== Tables do scale
+
+I live in Canada. The Bank of Canada estimates there are approximately 30 million financial transactions per day in
+this country. We have what we call the "Big 5" banks. If we assume they get the brunt of these transactions (lets say
+two thirds), that would be 20 million transactions. If we assume an even distribution, that means they each handle
+about 4 million transactions per day. Banks have been handling this kind of load every day for years, and use SQL.
+
+Banks have obviously figured out how to scale SQL usage. I've never worked at a bank, so I do not know what they do to
+scale it. I suspect part of the solution is partitioning, most likely by date range - using separate disk space for
+transactions within a given date range, like a calendar month.
+
+If a bank averages 4 million transactions per day, at worst, a partition would contain 31 days * 4 million transactions
+= 124 million rows. Separate records would often be required for withdrawing from one account and depositing to another.
+Assuming two rows for every transaction yields 248 million rows per month. Your average corporate craptop, which
+performs far worse than an actual server, can easily find a random row out of a million in 2 ms by primary key.
+
+I'm sure it's not that simple, and there is probably more data than that - banks have a fantastically reliable system,
+and my guess is this reliability comes at the cost of more data. Even if we double that amount again, at about 500
+million rows per month, that is a manageable amount of data. If that amount of data is too slow, partitions could be
+more granular, like the first and second halves of the month, to cut the number of rows per partition roughly in half.
+
+Banks in Canada are required to store data for 7 years, so the process might work something like this:
+
+* Near the end of each month, run a job that does two things:
+** Create new partition(s) for the upcoming month's date range. The partition(s) must exist before the new month, to
+   ensure there are separate partition(s) to store the next month's data before the first transaction of the next
+   month occurs.
+** Delete any partitions more than 7 years old. This saves space for data that is not required to be stored.
+** As transactions occur in the next month, they are all stored in the new partition(s) automatically.
+
+== Nothing is "bolted on"
+
+The author keeps referring to features as "bolted on". To borrow an English expression - "bollocks". SQL vendors aren't
+stupid, they keep up with the times. Just like banks came up with email transfers to make our lives easier, SQL vendors
+have added requested features like XML, JSON, window functions, partitioning, etc.
+
+Each of these features are well thought out, which is why the are so reliable. Take JSON for example: while different
+vendors implement JSON differently, they have common threads:
+
+* A single type named JSON can internally represent an Object, Array, String, Number, Boolean, or Null value
+* Operators to access particular object keys or array elements
+* Functions to turn a JSON array into rows of JSON value elements, and vice-versa
+* Functions to turn a JSON object into rows of string keys and JSON values, and vice-versa
+* Operators/functions to dig through a JSON value with a path expression
+* A function to determine which of the six valid types of JSON values a particular JSON value contains
+* Indexes can be made on individual JSON properties, or maybe on all properties
+
+With really not that many lines of SQL, you can do things like the following:
+
+* Turn an object into rows of key and value columns
+* Use a where clause to eliminate any keys that match some pattern that represents internal storage details that should
+  not be exposed to the application.
+* Rebuild a new object from the remaining rows
+
+In the above process, the important part is that the table of keys and values has the value column typed as JSON: an sql
+table must have a single type for each column, yet the values of JSON keys can be any of the six different valid JSON
+values. This is why the single type JSON can internally store any of the six value types, unlike how the application
+layer handles JSON.
+
+Effectively, SQL support for JSON is fairly consistent with SQL philosophy and patterns. There is good documentation
+explaining it, it doesn't require being a genius to use it. There are plenty of examples to follow on common sites like
+SO, and god forbid, the vendor documentation pages.
+
+Every new feature SQL vendors offer has the same painstaking care taken to implement it in a way that makes sense, and
+to consider what kind of operators, functions, aggregate functions, window functions, etc might be needed for the
+feature. And of course, due to user requests, sometimes additional use cases are considered, and additional operators
+and so on are added over time.
+
+Nothing is just thrown in as an afterthought. Ever.
+
+== Marshaling is hard
+
+No it isn't. Any language with reflection and SQL support is bound to have one or more ready made ORM solutions to
+translate a row into an Object/Struct/whatever the language calls it, and vice-versa. Some solutions like Java JPA are
+incredibly complex, but in my view that is a more a symptom of the Java community making mountains out of mole hills for
+practically everything.
+
+Generally speaking, languages have low level database support like the following, that these ORMs are built on:
+
+* Open a connection
+* Create a statement with a parameterized query
+* Set the parameter values
+* Execute the query in one of two ways:
+* For write queries, did it succeed or fail
+* For read queries, collect the results into one or more objects added to some kind of list/array/whatever it is called
+
+Like anything, if the ORMs you see are way too complicated, you can make a simple one. All you really need at a minimum,
+is to figure out the reflection details of translating SQL types into application types and vice-versa. This isn't as
+bad as it sounds, as most SQL driver implementations allow some flexibility, such as you can ask for any type as
+a string.
+
+You can also write a code generator that takes some kind of specification - I would use TOML if I did this today - and
+generate Data Transfer Objects (DTOs) that represent the columns of a table, and Data Access Objects (DAOs) that have
+methods for operations like the following:
+
+* Upsert one DTO
+* Upsert many DTOs
+* Select one row by id
+* Select many rows by ids
+* Delete one row by id
+* Delete many rows by ids
+* Helper methods
+** Populate a statement from a DTO and vice-versa
+** Collect query results into one DTO or a list of DTOs
+
+Any custom queries can be written as methods of subclasses of the generated DAOs in a different directory, so that when
+the code generator is rerun later, it can begin by wiping the directory of generated classes to ensure that:
+
+* any no longer relevant previously generated classes are removed
+* custom subclasses are untouched
+
+Arguably, making your own solution sounds like time wasted, but if you have a situation that warrants it, why not?
+EG, in Java, there are less popular, simpler solutions than JPA available, exactly because, like me, they figure JPA is
+an overblown memory hog.
+
+== SQL is not good at real time
+
+In this case, the author has a point - but that does not mean SQL should be abandoned. Just because you can dream up a
+case SQL is not good at, does not mean throwing it out entirely. Instead, it means adding another solution based on the
+data in the SQL database.
+
+I haven't used real time databases, but I'm sure there are ways to populate real time databases from SQL data as SQL
+data is added, with some kind of replication. The SQL database might even have such replication built in, or could be
+added - eg, Postgres has Foreign Data Wrappers that might help in this case.
+
+You don't have to have one database to rule them all. Usually, you can do everything you need with SQL, but not always -
+just like everything else.
+
+== JOINs are hard
+
+No they aren't. You only really have to understand a few keys ideas to pick them apart:
+
+* All joins of table a to table b effectively collect all columns of table a and table b into one flat list of columns
+* Just using a comma means a cartesian cross product - multiply every row of table a by every row of table b. This is
+  most often used when the data selected from table a and/or b is a single row, so that you are only multiplying by one.
+* A left join of table a to table b is optional - the corresponding row in b may not exist, in which case all columns of
+  b are null for that specific row. This can be detected by checking if the primary key column of b is null.
+* A right join of table a to table b requires a corresponding row in b to exist, otherwise the row in a is filtered out.
+  It effectively acts as a where criteria, and could be rewritten as a left join where the primary key of b is not null.
+* A full join of table a to table b provides three kinds of rows:
+** A row exists in both table a and table b and all columns have data
+** A row exists in table a only, all table b columns are null
+** A row exists in table b only, all table a columns are null
+
+== Columns are not a waste of space
+
+Since you can have columns that are type JSON, you can use JSON to store fields for various counter-cases of the usual
+SQL table definition, such as:
+
+* Rarely used fields that will only exist for a very small percentage of rows
+* User defined fields
+* Fields whose type can vary depending on other values of some of the non-JSON columns and/or JSON properties
+
+You don't have to use only non-JSON or only JSON columns. You can mix and match for perfectly good reasons.
+
+== Optimizers don't always help
+
+This is not quite true. Yes, some queries may not scale super well, but that is where proper application design comes
+into play. You should design the application to have a separate model, where only the model code knows you are using
+SQL, and contains all SQL queries.
+
+If a given query doesn't scale somehow, then the model can do anything necessary to speed up that query, such as:
+
+* Use the EXPLAIN command to finds out why the query is slow, and take actions, such as:
+** Add another index
+** Start using partitions
+** Add materialized views - views backed by a table to store the results in, where you have to periodically refresh
+   the view
+* Write more efficient model code that could, for example, use multiple queries of less data per query and give the
+  optimizer a better choice of indexes to use for them.
+* Cache data with Redis
+
+I know some people will say "but we're using microservices and they each own their own tables".
+
+* Having each service own its own tables is not very good for various reasons, such as:
+** If a feature like row level authorization is required, you have to implement it in every service
+** If some tables need extra solutions like caching, it is hard to know which tables use these extra solutions
+* A better idea is to have one microservice whose sole responsiblity is to do all querying
+** It acts as a choking point, a single place to implement features like row level authorizations
+** It is a form of the Single Responsibility principle, where one service is just data, and each other service is just
+handling the details like validations of one data type
+* Just because it is popular to have each service own its own table does not make it a good idea
+
+== Denormalization is generally not needed
+
+I'm sure there are use cases for it, but I have personally never needed it for any project I've worked on. You don't
+have to choose normalized or denormalized - you can have a hybrid of both, where a view can be used to produce a
+denormalized view of multiple normalized tables.
+
+Such a view can be materialized to act as a cache to speed up results, and has the added benefit of not having to keep
+replicating the same join conditions in multiple queries. This is why purists suggest always using views - it allows
+for manipulating views in any way needed over time, without always having to tweak application code.
+
+Your SQL vendor may support "INSTEAD OF" triggers, which apply only to views. Such a trigger can be added to the
+denormalized view to translate the denormalized data into the normalized tables.
+
+== Somebody has to actually learn SQL
+
+The original article reads like someone who is not interested in learning SQL in any real depth. I keep encountering
+this throughout my career, but much more so in more recent years. It seems to me that the following events have occurred
+over the course of the last 15 years:
+
+* Software companies had DBAs when I started, who helped devs with advice on improving performance, and how to make
+certain kinds of queries
+* Companies stopped hiring DBAs, leaving a gap of nobody who really knows databases in depth
+* Companies started using the cloud, where most of the management of a database is offloaded to the cloud company
+* ORMs like JPA that have a lot of complexity cropped up, and became defacto standard tools
+* Developers got used to not having to write SQL
+
+As a result of this progression, a lot of developers out there today:
+* Have probably never worked with a DBA
+* Are unaccustomed to writing SQL queries of any real complexity
+* Do not know what features are available for speeding up queries or scaling performance
+* Do not know their SQL database can do any of the following:
+** Full text searching
+** Graph queries
+** Hierarchical queries
+
+This knowledge gap isn't due entirely to the developers, companies need to ensure they have some database developers.
+Maybe not every team needs a database developer, but companies need to have some available for those who need them.
+Developers need to get in the habit of assuming that their SQL database will serve their needs until a more savvy
+database developer says otherwise.
+
+A little common sense goes a long way:
+* If nobody understands how some queries work, how is that different than nobody understanding how some Java code works?
+The same solution can be used to solve both these problems: appropriate comments and documentation
+* If you are using several different strategies in the database, document each strategy, including what problem is
+being solved, and how it is being solved with a concrete example
+* CTEs are a good way of making your SQL readable in a top down fashion, more procedural like application code
+* Comment queries just like you would comment application code
+
+I am not an old, greybeard, Gandalph DBA. I am a developer who happens to have a keen interest in databases, and am in
+the process of migrating an ETL from MSSQL Server to BigQuery. There are a lot of BQ functions and procedures simply
+because the original MSSQL solution was written that way, and it is the easiest way to translate the code. Others who
+aren't me and weren't involved in the original implementation can understand the approaches being used, and can keep up
+with the kinds of queries we're writing.

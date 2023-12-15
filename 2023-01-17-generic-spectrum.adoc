@@ -1,0 +1,198 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= Generic Programming as a Spectrum
+
+== Paradigm
+
+Generic Programming as a concept simply means the ability to write a single algorithm that can be applied against
+multiple disparate types, without having to code specializations for each type.
+
+For example, the C language does not have a generic language construct, but does allow generic programming via the void
+pointer type. A linked list implementation would use the void pointer type only for the value of unknown type in each
+node struct, as in the following snippet:
+
+[source,C]
+----
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+typedef struct Node {
+    struct Node *next;
+    void *data;
+} Node;
+
+typedef struct List {
+    Node *head;
+} List;
+
+void iterateList(List list, void (*callback)(void *)) {
+    for (Node *n = list.head; n != NULL; n = n -> next) {
+        callback(n->data);
+    }
+}
+
+void printingCallback(void *element) {
+    printf("Int element = %d\n", (int)(intptr_t)(element));
+}
+
+int main() {
+    Node *node1 = (Node *)(malloc(sizeof(Node)));
+    node1->data = (void *)(5);
+
+    Node *node2 = (Node *)(malloc(sizeof(Node)));
+    node2->data = (void *)(6);
+
+    List intList;
+    intList.head = node1;
+    node1->next = node2;
+    node2->next = NULL;
+
+    iterateList(intList, printingCallback);
+
+    return 0;
+}
+----
+
+== Combination of other features
+
+I have been using Go generics for awhile now, and overall I have come to appreciate that it is better and easier to use
+than C++ or Java implementations. Like all generic implementations, has some limitations, such as (this is not intended
+to be an exhaustive list):
+
+- A generic variable can refer to interface types, but a type constraint cannot.
+- A generic method cannot introduce additional generic type variables over and above those defined in the struct.
+- An operator (such as addition) can only be used in a generic function if all allowable types support it.
+- A method (such as Add) can only be used in a generic function if all allowable types declare it with the same signature.
+- There is no way to "prove" to the compiler that a section of code in a generic function can safely assume a smaller
+  subset of types than that declared.
+
+These limitations require applying a variety of approaches, such as:
+
+- Repeat the desired interface types in the type variable definition for each function that accepts the same range of
+  types, where at least one accepted type is an interface.
+- Write top level functions that operate on a struct from without, so that the function is free to define as many extra
+  generic type variables as needed, over and above any declared on the struct.
+- Write multiple functions using suffixes (since Go does not allow overloading). Each function can limit the generic
+  type declarations such that all accepted types allow the desired operator or method signature(s).
+- Use reflection and/or type assertions to determine which smaller subset of types was actually passed, to allow the
+  compiler to be certain what operations are allowed to be performed.
+
+== Examples of overcoming limitations
+
+=== Mathematical conversions
+
+I'm in the process of writing a Go library, and one of the files provides various mathematical conversions between
+types without loss of precision. If a loss of precision cannot be avoided, an error is returned. This is not as easy as
+it may first sound:
+
+- An unsigned type can hold larger values than a signed type of the same number of bits
+- A signed type can be negative, an unsigned type cannot
+- The absolute value of the smallest negative value of a signed type is the same negative value.
+  Eg, an int8 has the range [-128, 127]. The absolute value of -128 is -128, while the absolute value of any other
+  negative value is the corresponding positive value.
+- When integers are cast to float, they may contain a value too large to be represented by the mantissa, requiring a
+  non-zero exponent. Depending on the integer value, there may or may not be a combination of mantissa and exponent that
+  exactly represents the integer value.
+- The big types are not a very good api. They sometimes panic, they sometimes return an error, and the big.Float type
+  does not bother to ensure the minimum number of bits are allocated to accurately represent the value provided.
+
+Part of the philosophy of my library is not have a ton of hidden functions that are not exposed - I prefer to expose as
+much as possible. If I write functions that benefit from a utility function, perhaps the user will also wish to call it.
+An example is the NumBits function, which returns the number of bits of any integer or float type:
+
+[source,Go]
+----
+func NumBits[T constraint.Signed | constraint.UnsignedInteger](val T) int {
+	return int(goreflect.ValueOf(val).Type().Size() * 8) -- Note reflect.Type.Size() returns bytes, I want bits
+}
+----
+
+The above function serves as the basis for converting between any two signed int types, returning an error if the source
+value is outside the range of the target value:
+
+[source,Go]
+----
+errMsg = "The %T value of %s cannot be converted to %s"
+
+minIntValue = map[int]int{
+  8:  math.MinInt8,
+  16: math.MinInt16,
+  32: math.MinInt32,
+  64: math.MinInt64,
+}
+
+maxIntValue = map[int]int{
+  8:  math.MaxInt8,
+  16: math.MaxInt16,
+  32: math.MaxInt32,
+  64: math.MaxInt64,
+}
+
+func IntToInt[S constraint.SignedInteger, T constraint.SignedInteger](ival S, oval *T) error {
+	var (
+		srcSize = NumBits(ival)
+		tgtSize = NumBits(*oval)
+	)
+
+	if (srcSize > tgtSize) && ((ival < S(minIntValue[tgtSize])) || (ival > S(maxIntValue[tgtSize]))) {
+		return fmt.Errorf(errMsg, ival, fmt.Sprintf("%d", ival), fmt.Sprintf("%T", *oval))
+	}
+
+	*oval = T(ival)
+	return nil
+}
+----
+
+There are three other functions IntToUint, UintToInt, and UintToUint because:
+- Different problems occur for each of the four possible combinations of a signed or unsigned source value, and a
+  signed or unsigned target value.
+- Writing function overloads allows writing code that can just assume the set of problems to solve, without needing any
+  type assertions or reflection (beyond that of using NumBits).
+
+There is a "big daddy" function called simply To that accepts any primitive numeric type, string, or big type for both
+source and value types. There are five signed int types, five unsigned types, two float types, string, and 3 big types,
+for a total of 16.
+
+This allows for 16 * 16 = 256 conversions - obviously it is impractical to use 256 type assertion combinations, so
+instead reflection provides a string of the form "<source type><target type>" that is used with a map. There are 16
+conversions where the source and target type are identical, which do not require a conversion function.
+
+Go allows subtypes to be declared (such as "type byte uint8"). Since there is no limit to how many such types can exist,
+these types need to be converted, so that if the caller passes a byte, we can use the string "uint8" to find the
+conversion function. A separate reflection package provides a ToBaseType function for this purpose.
+
+[Source,Go]
+----
+convertFromTo = map[string]func(any, any) error{
+  // ==== To int
+  "int8int": func(t any, u any) error {
+    *(u.(*int)) = int(t.(int8))
+    return nil
+  },
+  ... // yes, there are 250 of these functions, and yes they are all tested!
+}
+
+func To[S constraint.Numeric | ~string, T constraint.Numeric | ~string](src S, tgt *T) error {
+	var (
+		valsrc = goreflect.ValueOf(src)
+		valtgt = goreflect.ValueOf(tgt)
+	)
+
+	// Convert source and target to base types
+	reflect.ToBaseType(&valsrc)
+	reflect.ToBaseType(&valtgt)
+
+	// No conversion function exists if src and *tgt are the same type
+	if valsrc.Type() == valtgt.Elem().Type() {
+		valtgt.Elem().Set(valsrc)
+		return nil
+	}
+
+	// Types differ, lookup conversion using base types and execute it, returning result
+	return convertFromTo[valsrc.Type().String()+valtgt.Type().Elem().String()](valsrc.Interface(), valtgt.Interface())
+}
+----
+
+BigOps explanation
