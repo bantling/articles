@@ -19,23 +19,22 @@ scale it. I suspect part of the solution is partitioning, most likely by date ra
 transactions within a given date range, like a calendar month.
 
 If a bank averages 4 million transactions per day, at worst, a partition would contain 31 days * 4 million transactions
-= 124 million rows. Separate records would often be required for withdrawing from one account and depositing to another.
-Assuming two rows for every transaction yields 248 million rows per month. Your average corporate craptop, which
-performs far worse than an actual server, can easily find a random row out of a million in 2 ms by primary key.
+= 124 million rows. I assume separate records would be required for withdrawing from one account and depositing to another.
+Assuming two rows for every transaction yields 248 million rows per month. For perspective, your average corporate
+craptop, which performs far worse than an actual server, can easily find a random row out of a million in 2 ms by
+primary key.
 
 I'm sure it's not that simple, and there is probably more data than that - banks have a fantastically reliable system,
 and my guess is this reliability comes at the cost of more data. Even if we double that amount again, at about 500
 million rows per month, that is a manageable amount of data. If that amount of data is too slow, partitions could be
 more granular, like the first and second halves of the month, to cut the number of rows per partition roughly in half.
 
-Banks in Canada are required to store data for 7 years, so the process might work something like this:
-
-* Near the end of each month, run a job that does two things:
-** Create new partition(s) for the upcoming month's date range. The partition(s) must exist before the new month, to
-   ensure there are separate partition(s) to store the next month's data before the first transaction of the next
-   month occurs.
-** Delete any partitions more than 7 years old. This saves space for data that is not required to be stored.
-** As transactions occur in the next month, they are all stored in the new partition(s) automatically.
+Banks in Canada are required to store data for 7 years, so the process might work by running a job near the end of each
+month, that does two things:
+* Create new partition(s) for the upcoming month's date range. The partition(s) must exist before the new month, to
+  ensure there are separate partition(s) to store the next month's data before the first transaction of the next
+  month occurs. Safest bet is run the job on the 28th, as every month has at least 28 days.
+* Delete any partitions more than 7 years old. This saves space for data that is not required to be stored.
 
 == Nothing is "bolted on"
 
@@ -58,7 +57,7 @@ With really not that many lines of SQL, you can do things like the following:
 
 * Turn an object into rows of key and value columns
 * Use a where clause to eliminate any keys that match some pattern that represents internal storage details that should
-  not be exposed to the application.
+  not be exposed to the application
 * Rebuild a new object from the remaining rows
 
 In the above process, the important part is that the table of keys and values has the value column typed as JSON: an sql
@@ -72,8 +71,8 @@ SO, and god forbid, the vendor documentation pages.
 
 Every new feature SQL vendors offer has the same painstaking care taken to implement it in a way that makes sense, and
 to consider what kind of operators, functions, aggregate functions, window functions, etc might be needed for the
-feature. And of course, due to user requests, sometimes additional use cases are considered, and additional operators
-and so on are added over time.
+feature. Each new feature works like it was well planned, and reasonably similar to other features. And of course, due
+to user requests, sometimes additional use cases are considered, and additional operators and so on are added over time.
 
 Nothing is just thrown in as an afterthought. Ever.
 
@@ -96,7 +95,7 @@ Generally speaking, languages have low level database support like the following
 Like anything, if the ORMs you see are way too complicated, you can make a simple one. All you really need at a minimum,
 is to figure out the reflection details of translating SQL types into application types and vice-versa. This isn't as
 bad as it sounds, as most SQL driver implementations allow some flexibility, such as you can ask for any type as
-a string.
+a string. An ORM doesn't have to be a beast that generates queries for you, and caches results, and so on.
 
 You can also write a code generator that takes some kind of specification - I would use TOML if I did this today - and
 generate Data Transfer Objects (DTOs) that represent the columns of a table, and Data Access Objects (DAOs) that have
@@ -112,25 +111,27 @@ methods for operations like the following:
 ** Populate a statement from a DTO and vice-versa
 ** Collect query results into one DTO or a list of DTOs
 
-Any custom queries can be written as methods of subclasses of the generated DAOs in a different directory, so that when
-the code generator is rerun later, it can begin by wiping the directory of generated classes to ensure that:
+Any custom queries can be written as methods of subclasses of the generated DAOs in a different directory, and leverage
+the helper methods to translate SQL rows <-> DTOs. When the code generator is rerun later, it can begin by wiping the
+directory of generated classes to ensure that:
 
 * any no longer relevant previously generated classes are removed
 * custom subclasses are untouched
 
 Arguably, making your own solution sounds like time wasted, but if you have a situation that warrants it, why not?
 EG, in Java, there are less popular, simpler solutions than JPA available, exactly because, like me, they figure JPA is
-an overblown memory hog.
+an overblown memory hog. Someone had to write those simpler solutions.
 
 == SQL is not good at real time
 
-In this case, the author has a point - but that does not mean SQL should be abandoned. Just because you can dream up a
-case SQL is not good at, does not mean throwing it out entirely. Instead, it means adding another solution based on the
-data in the SQL database.
+In this case, the author may have a point - but that does not mean SQL should be abandoned. Just because you encounter a case
+SQL is not good at, does not mean throwing it out entirely. Instead, it means adding another solution based on the data
+in the SQL database.
 
 I haven't used real time databases, but I'm sure there are ways to populate real time databases from SQL data as SQL
 data is added, with some kind of replication. The SQL database might even have such replication built in, or could be
-added - eg, Postgres has Foreign Data Wrappers that might help in this case.
+added - eg, Postgres has Foreign Data Wrappers that might help in this case. In some cases, you should be able to just
+use SQL, by tuning it accordingly.
 
 You don't have to have one database to rule them all. Usually, you can do everything you need with SQL, but not always -
 just like everything else.
@@ -142,6 +143,7 @@ No they aren't. You only really have to understand a few keys ideas to pick them
 * All joins of table a to table b effectively collect all columns of table a and table b into one flat list of columns
 * Just using a comma means a cartesian cross product - multiply every row of table a by every row of table b. This is
   most often used when the data selected from table a and/or b is a single row, so that you are only multiplying by one.
+  The keywords CROSS APPLY can be used instead of a comma.
 * A left join of table a to table b is optional - the corresponding row in b may not exist, in which case all columns of
   b are null for that specific row. This can be detected by checking if the primary key column of b is null.
 * A right join of table a to table b requires a corresponding row in b to exist, otherwise the row in a is filtered out.
@@ -170,7 +172,7 @@ SQL, and contains all SQL queries.
 
 If a given query doesn't scale somehow, then the model can do anything necessary to speed up that query, such as:
 
-* Use the EXPLAIN command to finds out why the query is slow, and take actions, such as:
+* Use the EXPLAIN command to find out why the query is slow, and take actions, such as:
 ** Add another index
 ** Start using partitions
 ** Add materialized views - views backed by a table to store the results in, where you have to periodically refresh
@@ -188,7 +190,7 @@ I know some people will say "but we're using microservices and they each own the
 ** It acts as a choking point, a single place to implement features like row level authorizations
 ** It is a form of the Single Responsibility principle, where one service is just data, and each other service is just
 handling the details like validations of one data type
-* Just because it is popular to have each service own its own table does not make it a good idea
+* Just because it is popular to have each service own its own table(s) does not automatically  make it a good idea
 
 == Denormalization is generally not needed
 
@@ -227,8 +229,8 @@ As a result of this progression, a lot of developers out there today:
 
 This knowledge gap isn't due entirely to the developers, companies need to ensure they have some database developers.
 Maybe not every team needs a database developer, but companies need to have some available for those who need them.
-Developers need to get in the habit of assuming that their SQL database will serve their needs until a more savvy
-database developer says otherwise.
+Average developers need to get in the habit of assuming that their SQL database will serve their needs until a more
+savvy database developer says otherwise.
 
 A little common sense goes a long way:
 * If nobody understands how some queries work, how is that different than nobody understanding how some Java code works?
@@ -238,8 +240,12 @@ being solved, and how it is being solved with a concrete example
 * CTEs are a good way of making your SQL readable in a top down fashion, more procedural like application code
 * Comment queries just like you would comment application code
 
-I am not an old, greybeard, Gandalph DBA. I am a developer who happens to have a keen interest in databases, and am in
-the process of migrating an ETL from MSSQL Server to BigQuery. There are a lot of BQ functions and procedures simply
-because the original MSSQL solution was written that way, and it is the easiest way to translate the code. Others who
-aren't me and weren't involved in the original implementation can understand the approaches being used, and can keep up
-with the kinds of queries we're writing.
+I am not an old, greybeard, Gandalph DBA. I am a developer who happens to have a keen interest in databases, and our
+team is in the process of migrating an ETL from MSSQL Server to BigQuery. There are a lot of BQ functions and procedures
+simply because the original MSSQL solution was written that way, and it is the easiest way to translate the code. Others
+who aren't me and weren't involved in the original implementation can understand the approaches being used, and can keep
+up with the kinds of queries we're writing.
+
+SQL should remain for a long time, because it is an excellent language for manipulating data. Just like any other
+language, those who invest in learning it will find reasons to say it is a good solution, and those who don't will find
+reasons to say it isn't.
