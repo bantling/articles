@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+== Some thoughts on bad programming practices
+
+I recently read an article about the worst kind of programer (http://mikhailian.mova.org/node/284). I agree with the basic idea, but want to add my own thoughts about it.
+
+I have seen over time that developers seem really invested in learning new things for the sake of new things, rather than getting better at existing approaches.
+Programming is like everything else - new is not always better. I have a Honda CRV that is not as easy to use as some cars I used to own before touch interfaces became popular.
+The touch screen sometimes acts like I'm pressing various places on the screen when I'm not, making beeping noises and flipping screens randomly.
+I have to stop and turn the car off and on to stop it. It has a config screen with every option disabled. It has bizarre logic about locking and unlocking the doors,
+that I have never fully figured out. I often wonder if devs who make car software actually have a drivers license.
+
+If I tried asking 100 programmers the following question, chances are very few of them, if any, could answer it without a web search:
+
+Bob just completed programming school, and heard about MVC, but is unsure how to tell which code should be model, which code should be view, and which code should be controller.
+How would you explain the MVC division of code to Bob?
+
+It's not a genius question, it's really very basic stuff. Here are some other good questions about other very basic stuff:
+
+1. Why did developers decide in REST that POST is create and PUT is update?
+
+  The HTTP RFCs have always stated that PUT is create or update to a resource on the server such that a GET on that resource returns what was PUT,
+  and that POST is basically a grab bag of whatever does not fit into other verbs. The RFCs used to say that a POST url is indicative of an operation,
+  now they just say POST is whatever you say it is.
+
+  Developers often talk about the REST usage of POST and PUT like Jesus Christ himself dictated this usage, like there is no argument about it.
+  I have never seen any legit reason why PUT cannot be create or update like the RFC says, and POST can be for non-CRUD stuff. Any real, complex
+  system that is driven by customer demand for features is highly likely to have some operations that are not CRUD - integrations with other
+  systems, calculations, searches (eg, a filter box that shows matches as you type, find results for a search based on input fields), and so on.
+
+  By reserving POST for these kinds of other operations, you can immediately identify anything that isn't CRUD.
+  Otherwise, you wind up with two usages of POST - mostly for create, but here and there for other stuff.
+
+2. Why do Java developers insist on Spring and JPA for absolutely every Java project without question?
+
+  Arguably, a microservice project should be, well, you know, micro. Micro is defined as an adjective that means extremely small.
+  When Spring and JPA take up over 200MB of memory, and takes 10 seconds to fire up a near empty project that barely writes one row to a table,
+  I'm not seeing the micro here.
+
+  Call me crazy, but maybe micro should be applied to the whole approach, not just the line count: the amount of memory, the amount of hand written code,
+  the amount of time a new hire takes to understand how the code works, etc. You don't have to be a freak about it, trying 10 languages to see which
+  uses the least amount of RAM, just be reasonable about it.
+
+  In this case, Spring and JPA were designed for monolithic development, where you might have problems like the following:
+  - A constructor is referred to 100 times in the code. Adding a new field requires modifying all 100 constructor calls to provide the new field,
+    but only one of those calls actually uses the new field. So dependency injection is useful.
+  - There are thousands of tables, with tens of thousands of queries, that need to be supported in multiple databases (eg, Oracle and MSSQL), with
+    uses cases like multi-tenancy and/or sharding. There comes a point where it is just too much to do some other way, and JPA is very helpful.
+
+3. Why does every web app require heavy amounts of JS code?
+
+  When I started in this business, we used JSP (Java Server Pages), which is a type of SSR (Server Side Rendering). Basically, an HTML templating system
+  that can fill in the slots with values that usually come from a database. It means when users click on a button, the whole page reloads, which these
+  days is fast enough for it to be a brief sort of blink.
+
+  The bank I have used since about 2009 still uses some sort of SSR. As a customer, I don't care it's a bit blinky. It responds in about a second after
+  each click, and I'm only going to do maybe 12 page loads in a session before logging out. I can't find any complaint on the web about it.
+
+  I saw a project "upgrade" from JSP to Angular. They had a lot of uncommented JSP code that nobody really knew how it worked, which became Angular code
+  nobody really knew how it worked. Some people would add new business logic to Angular, some would add it to Java code, and nobody leading the project
+  thought it was a good idea to make a decision about this.
+
+  Nobody ever explained why this upgrade was of any benefit, or what it would do. The new features being added afterwards were no more or less complex
+  than what was there before, so continuing to use JSP would not have posed any problems. It appeared to be an upgrade for the sake of an upgrade.
+
+4. Why is everything new automatically so much better than older approaches?
+
+  What is wrong with the tools used 10 or 15 years ago? After all, everything else works with this way. Sure, we have cars with touch screens now, but they
+  still use gas, tires, cloth or leather seats, a glove box, a steering wheel, glass, etc. The parts you touch daily to drive are basically the same as
+  decades ago, with a few exceptions like the touch screen and electric engines.
+
+  Why can't we just use a simple way of mapping SQL tables to objects, like a code generator? Why can't we still use HTML templating systems for line of
+  business apps that are mostly CRUD? Why can't we use approaches that are only as complex as actually required for the system at hand? I haven't seen any
+  real improvements in newer languages or tooling that are significantly better in real world usage, with a few exceptions like using containers.
+
+5. Do you think other industries work this way?
+
+  I can tell you right now if engineers built stuff like programmers do, I would never get in a car, walk under a bridge, or board an airplane.
+  If doctors worked that way, I'd be mortally afraid every visit. So why do we do things this way? Is this really the best we can do?
+
+I worked with a guy who asked shortly after being hired "why the f to we have a mono repo?". When I asked what is wrong with a monorepo, he was unable to give
+any answer, but convinced management how this has to change pronto, apparently convinced with almightly passion all microservice projects must be structured as
+separate repos per service. Not sure if it was him or someone else, but somehow it was determined that each project must be deployed in its own container. These
+decisions were detrimental to the project in the following ways:
+
+- One project was a definition of all objects to be sent over the wire. If service A object is updated to require a new field, there is no compile error anywhere
+  to show the need to update constructor calls. If service B calls A to create objects, and nobody thinks of this, then probably only service A is updated to
+  provide the new required field, and a subtle hard to find bug exists, that might take awhile for anyone to even notice.
+- Your average corporate dev box can handle maybe 15 containers before flopping over and gasping for air. So we quickly lost local development in one of those
+  unrecoverable ways where the team would never get it back.
+- Every new dev would have to checkout dozens of repos.
+- No dependency information between repos was tracked anywhere, making it unknowable which subset of services have to be run to stand up service X to work on that
+  one service. Combined with the inability to run all repos locally yields two equally sucktastic solutions to working on service X:
+  - Use trial and error to figure out which subset stands up X and run it locally
+  - Deploy every code change to a dev server
+
+When Alex talks about programmers using hugely complex solutions of the sort he describes, it sounds to me like devs who basically jerk off to everything new
+and cool. This is very common in this business, every team has people like that in it. That isn't necessarily a big problem by itself, but when combined
+with the inability/unwillingness to ensure other devs are fully capable of maintaining the system, and possibly the arrogance of "everything I say is clearly best",
+and/or "only I can maintain this system", that's the killer combination that does far more harm than good.
