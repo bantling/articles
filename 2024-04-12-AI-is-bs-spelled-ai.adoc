@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+== AI is BS spelled AI
+
+I don't believe I've ever seen such a fantastic pile of nonsense as AI is going to solve every conceivable problem. I
+think anyone with a brain in their head should understand AI is just the latest over-hyped tech, that will fail to
+deliver just like everything else.
+
+It's not artificial when Microsoft buys GitHub with the intent of injecting an all your code belong to us clause in legal
+language buried deeply in a EULA nobody is going to read. It's not artificial to use GitHub to power Copilot. It's not
+artificial to power text prompting image generators with all manner of existing content, some of which is copyrighted,
+or the same thing for music or written works.
+
+It's not artificial when MS takes Cortana down for spewing racism within 24 hours, and retraining it with a subset of the
+internet that isn't racist. It's not artificial when Just Walk Out is powered by humans watching videos of customers to
+determine what they put in their bag and automatically bill them for it.
+
+AI is way overhyped, Elon is just a typical full of himself CEO of a high-flying company. AI is not going to reshape the
+world. All it is going to do is augment existing technology and software and processes. It is only ever going to be
+capable of being an assistant. Anyone who thinks otherwise, is only fooling themselves.
+
+There's a reason why AI code assistants generate insecure code from other insecure code - it simply does not have the
+ability to reason. I can reason with another developer about why I take a particular approach to a particular programming
+problem given a particular set of circumstances. My reasoning changes with changing circumstances.
+
+Intelligence is largely a matter of U+1F595, Reversed Hand with Middle Finger Extended. An example would be Huckleberry
+Finn, travelling down the river with Jim. Huck grew up in an incredibly racist society, where the first sentence out of
+someone else's mouth of a different race than yours is either filled with hate or not filled with hate. Everyone wore
+their racism on their sleeve. The white kid Huck decided the grown up black man Jim is a good man, despite all the crap
+he had heard his whole life from white people about blacks. It was his U+1F595 moment towards the society he grew up in.
+
+This is how we evolve our thinking, how we shape our attitude over time towards this world, and the people and processes
+we are surrounded by - we reverse our hands and extend our middle fingers towards everything we see as stupid, hateful,
+hurtful, useless, pointless, or any other sort of false premise. AI will never be capable of doing this in its present
+form. AI could only do this if it was self-aware.
+
+Do you want an AI that explains to you why it is so smart and you are so stupid? Why everything you do to get ahead
+in life is hopelessly pointless? How your children would be better served if only you cared to be a better parent?
+Looks down on you as another waste of its cpu cycles? Sees you as the human child in its care?
+
+We don't actually want AI because we don't want a self-aware consciousness we can't control running everything. We want
+an assistant to help us to perform boring, lengthy, and repetitive tasks better. We expect the assistant to be far better
+than current AI results offer. AI in its present form is useful for search tasks, such as:
+
+- Search for better ways to play games like chess or go
+- Find better ways to arrange thousands of traces on many layers of a motherboard
+- Optimize search results for considerations like heat, pressure, time, density, weight, colour
+- Find the best route for a salesman to travel and other graphing problems
+- A reasonable translation of text or spoken words from one language to another
+
+None of the above is life-altering, it is simply more convenient. It was definitely more convenient for me and my other
+half in our recent trip to Mexico to be able to use Google Translate with cab drivers, and people on the street asking for
+directions, and other conversations. We could have gotten by without it, but it was definitely better.
+
+We need to stop calling it AI and call it what it is - virtual assistance. That's all it is, and all it will ever be,
+and all we will ever want it to be. We will always want to know how things work, we will never want technology or
+processes that only the computer can understand. We will never have, and never will, want AI.
