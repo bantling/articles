@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+== Why OOP is a bad fit for custom software
+
+Ever notice that custom OOP projects tend towards a flaming pile of spaghetti crap?
+Have you ever seen anti-patterns like the following:
+
+* Changing a line of code to fix screen A blows up screen B, which have no relation to each other
+* Many wrappers - a Service is wrapped by a Provider is wrapped by a Performer is wrapped by a ...
+* It is hard to track down where is the code that performs a certain operation
+* Playing whack a mole, where each bug fix just yields a new bug
+
+Ever ask yourself why OOP has design patterns? I would argue that OOP assumes up front design before writing any code.
+In particular, OOP shines when every important thing is known at the outset. Take a Java List or Map as an example. They
+have remained virtually the same since the roll out of Java 1.2 when the collections API was added, replacing older
+classes like Vector and Dictionary.
+
+A List or Map is a simple beast - they are just ordered sets of data. A list orders items by index, a map by their keys.
+Once you have basic operations like add, change, and delete, what more do you really need? This is why Java has really
+only added conveniences like Map.computeIfAbsent, ConcurrentHashMap, and so on. Nothing huge, just some nice things that
+people were already doing anyway with their own convenience functions and/or classes.
+
+But custom software paid for by a customer who only knows what they want today is something altogether different. You
+literally don't know from one month to the next what feature the customer will ask for, or what bug they will report.
+Remember that OOP design pattern for random structural changes on a dime? Neither do I.
+
+== Why imperative is better
+
+OOP intrinsically means some kind of entanglement - once you pick a design pattern for a set of classes, and write a
+bunch of code for it, you can't easily change to some other design pattern. You can use different patterns for different
+sets of code, composing them as needed into a larger system. But each part is kind of locked in to a chosen pattern,
+and it is a significant hassle to change the pattern later.
+
+Unfortunately, a set of code doesn't necessarily shout out "Hey this is the strategy pattern". You have to examine a set
+of code to reverse engineer the pattern of it, or ask someone. Have you worked on a team that stated up front what
+patterns were being used for different parts of the system? I don't recall getting very much of this in my career.
+Really, in a lot of cases, there simply isn't any real conscious choice of design patterns, just replication of whatever
+the devs saw before elsewhere, often without any real contextual information of why.
+
+This entanglement easily leads to hard to deal with code if someone doesn't fully grok whatever pattern(s) are present.
+More often than not, using OOP for custom who-knows-what-the-customer-wants-next-week software is setting the system up
+for failure. Not failure as in it doesn't work, but failure as in it will virtually guaranteed become very hard to
+maintain.
+
+Using a simple imperative pattern is much better, which you can do even if the language is a primarily OOP language like
+Java. In the case of Java, just use static methods, where each class corresponds to either a data structure, or a series
+of static methods that operate on data structures. By passing data structures as arguments and returning new data
+structures, effectively the code is working from the outside, which makes the code simpler to understand, and tends
+towards less entanglement. You could organize packages like this:
+
+* Top level packages represent functional areas (eg, configuration, database access, REST API, validations, etc)
+** Sub packages for data structures and functions that operate on them
+** Some sub packages can represent model, view, and controller
+
+For example, it might be organized like this, where app is the top level dir checked out of the repo:
+
+[cols="1,1"]
+|===
+|Path
+|Purpose
+
+|app/db/util
+|some utility functions to make db access easier
+
+|app/db/dto
+|database transfer objects that represent data as stored/retrieved in the db
+
+|app/db/dao
+|database access objects that store/retrieve dtos
+
+|app/rest/util
+|some utility methods to make REST a bit easier 
+
+|app/rest/view
+|objects that represent the data as sent/received over http
+
+|app/rest/translate
+|translate app/db/dto to/from app/rest/view
+
+|app/rest/model
+|make app/db/dao calls to store/retrieve data, uses /app/rest/{view, translate}
+
+|app/rest/controller
+|define endpoints and methods, use app/rest/model to do the work
+
+|app/html
+|SSR html generation
+|===
+
+You'll notice I mention MVC above, which is an OOP pattern. However, this pattern can be simplified as a set of
+directories with one responsibility per directory, which can still be an imperative way of writing code. It's just a
+matter of operating on the data objects from the outside. Just because we don't want to use OOP doesn't mean we can't
+apply some of what we've learned from it over the years in an imperative way.
+
+The above looks like a monolithic design. It can be a hybrid if you want:
+
+* Make app/{service} dirs, which in turn contain db, rest, and html as shown above
+* Each service can be its own application
+* Services can be grouped into a smaller number of deployments, you don't have to deploy each service in its own
+  container
+
+== The most common mistake
+
+One of the most important things to consider is (DO)RY versus (DONT)RY. The over usage of (DONT)RY is often a very big
+pain point in OOP, but just can just as easily cause pain in any paradigm. Like Lists and Maps, (DONT)RY works best in a
+limited area of code, such as reusing some common code across all Map implementations. Essentially, it is just another
+variation of what I said earlier about knowing the design in advance - (DONT)RY can be quite useful when you know the
+considerations up front, but just another factor in making spaghetti code when you don't.
+
+(DO)RY is far more useful when you have a changes by the week application - the duplication isolates changes. For
+example, say you have a customer address and a business address. They seem kind of the same thing, with only minor
+differences:
+
+* Businesses have 3 lines, for doors and stops and other cupboard-under-the-stairs things individuals don't need
+* Businesses can have multiple addresses, so they need a type (physical, mailing, billing)
+
+It sounds like you could use the same code for both. But over time, random requests are made for random changes, and
+some changes need to only apply to one or the other address type. (DONT)RY causes these increasing differences to get
+harder and harder to manage. (DO)RY means copying code when a change needs to be done for both. The improvement stems
+from the fact that when a particular change must be implemented quite differently due to their differing code bases,
+there is no tangled mess problem - instead, it is just simply more effort, no reason for either code base to become any
+harder to read or modify.
+
+Effectively, (DO)RY encourages you to make separate silos for each data type - separate queries, separate db
+reads/writes, separate REST endpoints, separate HTML generation. This separation expresses an important truth I alluded
+to earlier about your data - every data type is completely unrelated to any other data type, it is a thing unto itself.
+While a data type may contain another data type, the contained data type is no different in function than an integer or
+string - it is just another value the type contains.
+
+Separating all your data types with their own code - copying code as necessary to maintain the separation - is the key
+to managing code that is very dynamic in response to frequent unknowable future changes.
