@@ -43,15 +43,15 @@ More often than not, using OOP for custom who-knows-what-the-customer-wants-next
 for failure. Not failure as in it doesn't work, but failure as in it will virtually guaranteed become very hard to
 maintain.
 
-Using a simple imperative pattern is much better, which you can do even if the language is a primarily OOP language like
-Java. In the case of Java, just use static methods, where each class corresponds to either a data structure, or a series
-of static methods that operate on data structures. By passing data structures as arguments and returning new data
+Using a simple imperative pattern is much better, which you can do even if the language is a primarily OOP language like Java.
+In the case of Java, just use static methods, where each class corresponds to either a data structure, or a series of
+static methods that operate on data structures. By passing data structures as arguments and returning new data
 structures, effectively the code is working from the outside, which makes the code simpler to understand, and tends
 towards less entanglement. You could organize packages like this:
 
 * Top level packages represent functional areas (eg, configuration, database access, REST API, validations, etc)
-** Sub packages for data structures and functions that operate on them
-** Some sub packages can represent model, view, and controller
+* Sub packages for data structures and functions that operate on them
+* Some sub packages can represent model, view, and controller
 
 For example, it might be organized like this, where app is the top level dir checked out of the repo:
 
@@ -121,6 +121,8 @@ harder and harder to manage. (DO)RY means copying code when a change needs to be
 from the fact that when a particular change must be implemented quite differently due to their differing code bases,
 there is no tangled mess problem - instead, it is just simply more effort, no reason for either code base to become any
 harder to read or modify.
+
+== Conclusion
 
 Effectively, (DO)RY encourages you to make separate silos for each data type - separate queries, separate db
 reads/writes, separate REST endpoints, separate HTML generation. This separation expresses an important truth I alluded
