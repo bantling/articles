@@ -17,9 +17,9 @@ have remained virtually the same since the roll out of Java 1.2 when the collect
 classes like Vector and Dictionary.
 
 A List or Map is a simple beast - they are just ordered sets of data. A list orders items by index, a map by their keys.
-Once you have basic operations like add, change, and delete, what more do you really need? This is why Java has really
-only added conveniences like Map.computeIfAbsent, ConcurrentHashMap, and so on. Nothing huge, just some nice things that
-people were already doing anyway with their own convenience functions and/or classes.
+Once you have basic operations like add, change, iterate, and and delete, what more do you really need? This is why Java
+has really only added conveniences like Map.computeIfAbsent, ConcurrentHashMap, and so on. Nothing huge, just some nice
+things that people were already doing anyway with their own convenience functions and/or classes.
 
 But custom software paid for by a customer who only knows what they want today is something altogether different. You
 literally don't know from one month to the next what feature the customer will ask for, or what bug they will report.
@@ -30,7 +30,7 @@ Remember that OOP design pattern for random structural changes on a dime? Neithe
 OOP intrinsically means some kind of entanglement - once you pick a design pattern for a set of classes, and write a
 bunch of code for it, you can't easily change to some other design pattern. You can use different patterns for different
 sets of code, composing them as needed into a larger system. But each part is kind of locked in to a chosen pattern,
-and it is a significant hassle to change the pattern later.
+and it is a significant hassle to change the pattern later. It's like the coding equivalent of vendor lock-in.
 
 Unfortunately, a set of code doesn't necessarily shout out "Hey this is the strategy pattern". You have to examine a set
 of code to reverse engineer the pattern of it, or ask someone. Have you worked on a team that stated up front what
@@ -43,15 +43,17 @@ More often than not, using OOP for custom who-knows-what-the-customer-wants-next
 for failure. Not failure as in it doesn't work, but failure as in it will virtually guaranteed become very hard to
 maintain.
 
-Using a simple imperative pattern is much better, which you can do even if the language is a primarily OOP language like Java.
-In the case of Java, just use static methods, where each class corresponds to either a data structure, or a series of
-static methods that operate on data structures. By passing data structures as arguments and returning new data
+Using a simple imperative pattern is much better, which you can do even if the language is a primarily OOP language like
+Java. In the case of Java, just use static methods, where each class corresponds to either a data structure, or a series
+of static methods that operate on data structures. By passing data structures as arguments and returning new data
 structures, effectively the code is working from the outside, which makes the code simpler to understand, and tends
-towards less entanglement. You could organize packages like this:
+towards less entanglement.
+
+You could organize packages like this:
 
 * Top level packages represent functional areas (eg, configuration, database access, REST API, validations, etc)
 * Sub packages for data structures and functions that operate on them
-* Some sub packages can represent model, view, and controller
+* Some sub packages can represent a design pattern like model, view, and controller
 
 For example, it might be organized like this, where app is the top level dir checked out of the repo:
 
@@ -89,9 +91,9 @@ For example, it might be organized like this, where app is the top level dir che
 |===
 
 You'll notice I mention MVC above, which is an OOP pattern. However, this pattern can be simplified as a set of
-directories with one responsibility per directory, which can still be an imperative way of writing code. It's just a
-matter of operating on the data objects from the outside. Just because we don't want to use OOP doesn't mean we can't
-apply some of what we've learned from it over the years in an imperative way.
+directories with one responsibility per directory, which can still be an imperative way of writing code. It can still be
+operating on the data objects from the outside. Just because we don't want to use OOP doesn't mean we can't apply some
+of what we've learned from it over the years in an imperative way.
 
 The above looks like a monolithic design. It can be a hybrid if you want:
 
@@ -100,13 +102,13 @@ The above looks like a monolithic design. It can be a hybrid if you want:
 * Services can be grouped into a smaller number of deployments, you don't have to deploy each service in its own
   container
 
-== The most common mistake
+== The other most common mistake
 
 One of the most important things to consider is (DO)RY versus (DONT)RY. The over usage of (DONT)RY is often a very big
-pain point in OOP, but just can just as easily cause pain in any paradigm. Like Lists and Maps, (DONT)RY works best in a
-limited area of code, such as reusing some common code across all Map implementations. Essentially, it is just another
-variation of what I said earlier about knowing the design in advance - (DONT)RY can be quite useful when you know the
-considerations up front, but just another factor in making spaghetti code when you don't.
+pain point in OOP. Like Lists and Maps, (DONT)RY works best in a limited area of code, such as reusing some common code
+across all Map implementations. Essentially, it is just another variation of what I said earlier about knowing the
+design in advance - (DONT)RY can be quite useful when you know the considerations up front, but just another factor in
+making spaghetti code when you don't.
 
 (DO)RY is far more useful when you have a changes by the week application - the duplication isolates changes. For
 example, say you have a customer address and a business address. They seem kind of the same thing, with only minor
@@ -117,18 +119,31 @@ differences:
 
 It sounds like you could use the same code for both. But over time, random requests are made for random changes, and
 some changes need to only apply to one or the other address type. (DONT)RY causes these increasing differences to get
-harder and harder to manage. (DO)RY means copying code when a change needs to be done for both. The improvement stems
-from the fact that when a particular change must be implemented quite differently due to their differing code bases,
-there is no tangled mess problem - instead, it is just simply more effort, no reason for either code base to become any
-harder to read or modify.
+harder and harder to manage, which is exactly the bad form of entanglement I keep seeing. (DO)RY means copying code when
+a change needs to be done for both.
+
+The improvement stems from the fact that when a particular change must be implemented quite differently due to their
+differing code bases, there is no tangled mess problem - instead, it is just more effort to do the change twice in
+different ways, without causing either code base to become any harder to read or modify.
+
+In some cases, a data type that has its own logic for persistence and retrieval/display might also be contained inside
+another data type for another use case. When contained, there is no reason to believe in the face of random changes that
+it will necessarily always require the same validations, persistence, and display logic as when it is used as a top
+level object. As such, all the logic for the contained object should be a copy of the top level code, so the two use
+cases can be as different as they need to be.
 
 == Conclusion
 
-Effectively, (DO)RY encourages you to make separate silos for each data type - separate queries, separate db
-reads/writes, separate REST endpoints, separate HTML generation. This separation expresses an important truth I alluded
-to earlier about your data - every data type is completely unrelated to any other data type, it is a thing unto itself.
-While a data type may contain another data type, the contained data type is no different in function than an integer or
-string - it is just another value the type contains.
+Imperative programming combined with (DO)RY encourages making separate silos for each data type - separate queries,
+separate db reads/writes, separate REST endpoints, separate HTML generation. This separation expresses an important
+truth I alluded to earlier about your data - every top level data type is completely unrelated to any other data type,
+it is a thing unto itself. Any correlation or similarity in two separate data types should be viewed as both accidental
+and temporal: in other words, they just so happen to be similar at the moment - there is no reason to believe their
+similarity will continue in the face of random unknowable future changes.
 
-Separating all your data types with their own code - copying code as necessary to maintain the separation - is the key
-to managing code that is very dynamic in response to frequent unknowable future changes.
+Separating all your top-level data types with their own imperative code and using (DO)RY - copying code as necessary to
+maintain the separation - is the key to managing code that has to be dynamic in response to frequent unknowable future
+changes. The resulting code will be larger as a result of copying logic, but more maintainable.
+
+In other words, everything in programming is a trade-off, and the combination of imperative and (DO)RY is the best 
+trade-off that results in more total code, but more maintainable code.
