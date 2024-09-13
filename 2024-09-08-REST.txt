@@ -1,0 +1,97 @@
+REST and HTTP semantics
+
+Roy Fielding created REST as his doctorate dissertation. After reading it at https://ics.uci.edu/~fielding/pubs/dissertation/top.htm,
+I would boil it down to three basic elements:
+
+- A document that describes object state
+- A transport mechanism to transmit the object state back and forth between systems
+- A set of operations to perform on the state
+
+While Roy was focused solely on http, I don't see why another transport could not be used, here are some examples:
+
+- Mount a WebDAV share (WebDAV is an HTTP extension, so is still using HTTP). Copy a spreadsheet (.xls, .xlsx, .csv,
+  .ods) into the mounted folder, where each row is the new/updated state. The act of copying into the share indicates
+  the operation of upserting, the name of the file indicates the type of data, the columns are the fields. The server
+  responds with (document name)-status.(document suffix), which provides a key for each row, a status, and possibly an
+  error message. In this case, it does not really make sense to request data.
+- Use gRPC. The object transmitted is the document, HTTP is the transport, the name of the remote method is the
+  operation. Data can be both provided and requested.
+- Use FTP. Similar to WebDAV, it is file based. The PUT command is upserting, the GET command is requesting. GET only
+provides a filename, so generally provides all data of the specified type. It is possible to allow for special filenames
+that indicate a hard-coded filter to GET a subset of data.
+
+Whenever I see REST implementation in the wild, they often do not follow basic HTTP semantics, and I have never
+seen any explanation given for this, just a bunch of varying opinions. None of those I found referenced the RFC. Most
+seem to figure that:
+
+- POST  = create
+- PUT   = update whole document
+- PATCH = update a portion of document
+- GET   = retrieve whole document
+
+This is counter to what HTTP (https://datatracker.ietf.org/doc/html/rfc9110#name-method-definitions) states regarding
+POST and PUT:
+
+- PUT is create or update. GET generally returns whatever was last PUT. If PUT creates, it MUST return 201 Created. If
+  PUT updates, it MUST return 200 OK or 204 No Content. The RFC suggests the content for 200 OK of a PUT should be the
+  status of the action. I think it would ok in the case of SQL to return the new row from a select statement. This has
+  the advantage that any generated columns are returned to the caller without having to perform a separate GET.
+- POST processes a resource according to its own semantics. Older RFCs said POST is for subordinates of a resource.
+  All versions give the example of posting an article to a mailing list, all versions say if a resource is created that
+  201 Created SHOULD be returned.
+
+I would argue that effectively what POST really means is:
+- Any data manipulation except create, full/partial update, or delete
+- Any operation that is not data manipulation, such as:
+  - Perform a full text search for rows that match a phrase
+  - Generate a GIS object to display on a map
+  
+The word MUST means your implementation is only HTTP compliant if you do what is stated. Using PUT only for updates
+obviously won't break anything, just because it isn't RFC compliant. If you provide clients that handle all the
+details of sending/receiving data, then what verbs get used won't matter much to the user of the client.
+     
+I'm the kind of guy who wants a reason for not following the RFC. I have never understood the importance of separating
+create from update in REST APIs, any more than in web apps. Think about cell phone apps like calendar appointments,
+notes, contacts, etc:
+
+- Create is hitting the plus icon, which displays an new form with empty or default values
+- Update is selecting an object and hitting the pencil icon, which displays an entry form with current values
+- Once the entry form appears, it works exactly the same in terms of field validations
+
+So why should REST APIs and web front ends be any different than cell phone apps? If it is helpful to phone users to get
+the same data entry form for create and update, wouldn't it be just as helpful to API and web users?
+
+If you decide to use PUT as create or update, and you're using SQL as a store, most vendors have an upsert query of some
+sort. Unfortunately, that does not help to decide when to return 200 OK or 201 Created. You'd have to look at the
+information your driver provides when a DML query executes to find a way to distinguish insert from update for an upsert
+, or use another query strategy.
+
+A simple example would be to perform an `update set ... where pk column = pk value`. If one row was affected, then the
+row exists and was updated, otherwise the row does not exist and an insert is needed. On Postgres, you can take
+advantage of the RETURNING clause, which can actually return anything, not just row data, as follows:
+
+`
+INSERT INTO <table>
+VALUES (...)
+ON CONFLICT(<pk column>) DO
+UPDATE SET (...)
+RETURNING (SELECT COUNT(<pk column>) FROM <table> WHERE <pk column> = <pk value>) exists
+`
+
+The genius of this is that:
+
+- The sub select in the RETURNING clause is executed first, so it determines if the row exists before the INSERT ON
+CONFLICT UPDATE query executes. The result of the query is one column named "exists", which is 1 if the row existed
+before the query executed, 0 if it did not.
+- The RETURNING clause can also return the columns of the row, including anything generated that was not provided.
+
+You only have to figure out once how to deal with if an insert or update is needed, and make a simple abstraction that
+all your PUTs can call that handles 200 OK or 201 Created.
+
+One nice benefit of using PUT as intended, is that as soon as you see a POST you know for certain it is not retrieval
+or persistence, and conversely you know to search for POST to find the code for any operation that is not retrieval
+or persistence.
+
+I think the benefits of using PUT and POST as described in the RFC outweigh whatever reasons people have for using them
+in the way that is not RFC compliant.
+

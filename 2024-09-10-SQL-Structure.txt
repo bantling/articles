@@ -1,0 +1,90 @@
+A Good Structure for SQL databases
+
+A database often has multiple clients. You start off with your trusty API that the front end accesses, and at some point
+you want to run some reports. You can't find a reporting tool in the language used for the API that does what you want,
+so you use a tool from another language. No problem, you have microservices, mixing languages is par for the course.
+But now you have two languages accessing the same database. Maybe a third will come later.
+
+One possible structure to use for SQL has the following schemas:
+
+- tables: Contains the tables of data
+- views:  Contains views of the data, which allow join conditions to change without the client needing to know
+- code:   Contains functions and procedures that provide a JSON interface, and perform searches. This is the only schema
+          clients have access to.
+
+The tables have the following two keys:
+
+- relid: A relationship id, for a surrogate key. This is never returned by the code, it is the primary key.
+- id:    A generated id returned by the code. The client does not need to generate these ahead of time for new records.
+         It is a unique key. The column has a unique constraint to prevent the same generated id for multiple rows.
+
+As for the kind of id column to use, UUIDs seems like an obvious choice. The problem with them is they are quite long,
+and not something you can really hold in your head. I think a better idea is to use a 64-bit serial column that uses a
+sequence under the hood, and convert it into a base62 value. The reason for base62 is that it does not need any symbols,
+just upper and lower case letters and digits. Since the range of ids is 64 bits, the maximum base62 value is LygHa16AHYF,
+which has a length of 11 chars. A value of 1 billion in base62 is 15ftgG, which is only 6 chars.
+
+You can convert back and forth with relatively simple loops, here is a Go example:
+
+```
+package main
+
+import "fmt"
+
+func main() {
+  var maxVal uint64
+  maxVal -= 1
+  fmt.Printf("hex = %x\n", maxVal)
+
+  var (
+    d rune
+    s string
+  )
+
+  for v := maxVal; v > 0; v = v / 62 {
+    r := v % 62
+    switch {
+    case r < 10:
+      d = '0' + rune(r)
+    case r < 10+26:
+      d = 'A' + rune(r-10)
+    default:
+      d = 'a' + rune(r-10-26)
+    }
+    s = string(d) + s
+  }
+
+  fmt.Printf("base62 = %s\n", s)
+
+  var val uint64
+  for _, chr := range s {
+    val = val * 62
+    switch {
+    case chr >= '0' && chr <= '9':
+      val += uint64(chr - '0')
+    case chr >= 'A' && chr <= 'Z':
+      val += 10 + uint64(chr-'A')
+    default:
+      val += 10 + 26 + uint64(chr-'a')
+    }
+  }
+  fmt.Printf("hex = %x\n", val)
+}
+```
+
+
+If you need to, you can define a shared full text search table, which has:
+- tblid:        Your vendor may have a specific type for table ids (eg Postgres OID), or just use a string
+- relid:        Primary key
+- description:  A human readable string that would look good in one of those combo filter box and drop down widgets. 
+- search_terms: Your vendor may have a specific type for this (eg Postgres TSVECTOR)
+
+The point of this table is to allow different kinds of objects to be full text search capable. When querying this table,
+you can limit the set of tbl_id values for a specific subset of tables you wish to search, or just search all of them.
+
+Any back end language will have support for JSON, obviously your browser supports it natively. One particularly good
+benefit of a JSON interface is that you ddon't need an ORM: just use the JSON decoder of your language to decode the
+JSON into object(s), and vice-versa. This simplifies the application layer, especially when multiple languages are used.
+
+
+ 
