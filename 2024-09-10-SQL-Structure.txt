@@ -5,86 +5,810 @@ you want to run some reports. You can't find a reporting tool in the language us
 so you use a tool from another language. No problem, you have microservices, mixing languages is par for the course.
 But now you have two languages accessing the same database. Maybe a third will come later.
 
-One possible structure to use for SQL has the following schemas:
+I've heard people every now and then talk about database independence, in the sense of being able to change to another
+database, and/or add an additional one. EG, you're using Postgres, but want to switch to MySQL or use both. This kind
+of independence does not really exist, for a number of reasons, such as:
+
+- Even a simple type like a string does not work the same everywhere
+  - Oracle recommends VARCHAR2
+  - Postgres has TEXT which is the same as VARCHAR with no limit supplied
+  - MSSQL has VARCHAR(MAX) which is a VARCHAR of maximum size allowed, and is stored differently
+- Date/time types will not necessarily have the same range of types and resolutions
+- Functions for operating on strings, generating random numbers or UUIDs, etc, are not the same
+- JSON support will vary in terms of the operators, functions, and indexes available and how they work
+- Any code written for custom functions and procedures will be in a different language for every vendor
+
+Your first decision should be asking a very important question developers almost never ask: How many records are
+expected to be entered per year?
+
+The answer to this can have an outsized influence on every other decision you make. If the system is going to be like a
+bank with a bazillion records a year, you have a lot of work to design it before even writing any code. If it is a small
+system with only 100 operators, who enter maybe 10,000 records per year, it's pretty hard to go wrong with any decision,
+since at that rate it would literally take a century just to get a million rows. To put this in perspective, your
+average corporate laptop can find a random row out of a million via an indexed key in a few milliseconds in a container.
+
+I'll throw out some ideas you can apply when deciding how to structure your database at a high level. Not all of these
+will apply to every situation, they're a starting point to make decisions from, they're just talking points:
+
+1. Use JSON to transfer data between the database and backend code.
+
+JSON has the advantage that basically JSON is your ORM - just use the JSON encoding/decoding library of your choice to
+go back and forth between your data structures and JSON text. If you do use multiple languages to access the database,
+the JSON facilities in each language will be far more similar to each other than ORMs. JSON is also easily pretty
+printed for debugging. You get a higher level view than a literal reflection of the table structures. The table
+structures can be changed without the JSON view necessarily having to change.
+
+2. Write functions and procedures for the application layer to call instead of using direct table access.
+
+- They can call each other
+- They can perform validations rather than using triggers. Unlike triggers, a function can validate multiple parts of
+  the JSON at once, that get written to different tables.
+- They can read/write multiple tables at once. EG, you have separate customer and address tables, and functions that let
+  the user provide a customer and an address that both get written in one call.
+- Searches can return a single JSON object or JSON array of objects
+- This maps nicely to separate microservices for different types, where each service uses appropriate calls 
+
+3. Use a set of schemas for specific purposes to organize your database:
 
 - tables: Contains the tables of data
-- views:  Contains views of the data, which allow join conditions to change without the client needing to know
-- code:   Contains functions and procedures that provide a JSON interface, and perform searches. This is the only schema
-          clients have access to.
+- views:  Contains views of the data, which allow join conditions to change without the client needing to know, as well
+          as using the view in multiple queries, sharing the join conditions.
+- code:   Contains above mentioned functions and procedures that provide a JSON interface.
 
-The tables have the following two keys:
+Consider using authorizations so that clients only have access to the code schema. This allows you some flexibility in
+your database by updating the code to provide the same api in the face of changes that every client can automatically
+benefit from, such as:
 
-- relid: A relationship id, for a surrogate key. This is never returned by the code, it is the primary key.
-- id:    A generated id returned by the code. The client does not need to generate these ahead of time for new records.
-         It is a unique key. The column has a unique constraint to prevent the same generated id for multiple rows.
+- Change the names of tables or views
+- Migrate some columns of a table to another table
+- Improve the code to better take advantage of indexes and/or index prefixes
 
-As for the kind of id column to use, UUIDs seems like an obvious choice. The problem with them is they are quite long,
-and not something you can really hold in your head. I think a better idea is to use a 64-bit serial column that uses a
-sequence under the hood, and convert it into a base62 value. The reason for base62 is that it does not need any symbols,
-just upper and lower case letters and digits. Since the range of ids is 64 bits, the maximum base62 value is LygHa16AHYF,
-which has a length of 11 chars. A value of 1 billion in base62 is 15ftgG, which is only 6 chars.
+The DDL script for the code schema should begin with DROP SCHEMA CODE CASCADE, to eliminate all existing code before
+creating code. Some vendors like Postgres allow overloaded functions and procedures by simply creating the same name
+with different arguments. If you change your mind about the argument types as you develop code, the drop ensures that
+only the overloads you want exist. If you decide code is no longer needed, just delete the code from the script, and the
+drop ensures it gets removed in the next deployment.
 
-You can convert back and forth with relatively simple loops, here is a Go example:
+3. Use a global table to contain the following columns describing other tables:
 
+- tblid:    An id for a table. Some vendors have a special type for this, like Postgres OID, or just use the string name.
+- relid:    A relationship id, for surrogate keys. This is never returned by the code, it is the primary key used in
+            foreign key relationships.
+- desc:     A descriptor of the row, eg for a customer it might be their first and last name.
+- terms:    Search terms stored in a format suitable for full text queries, such as Postgres TSVECTOR.
+- extra:    A JSON column for any extra fields we may want to allow for.
+- created:  The created date
+- modified: The modified date, which is initially the same as created
+
+We also need an id for the application layer to use. As for the kind of id to use, UUIDs seems like an obvious choice.
+The problem with them is they are quite long, and not something you can really hold in your head. I think a better idea
+is to use a 64-bit serial column for the relid, and convert it into a base 62 value for the id the client uses.
+
+Base 62 has the following advantages:
+- No symbols, just upper and lower case letters and digits
+- Short enough to keep in your head, like a git commit hash
+- Each relid has exactly one base 62 representation, and vice-versa
+- No need to store it
+- Using a signed 64 bit value, the maximum base 62 value is AzL8n0Y58m7, which has a length of 11 chars. A value of
+  10 billion in base 62 is Aukyoa, which is only 6 chars.
+
+Using a serialized relid in the global table ensures that each relid is globally unique - only one table in the whole
+system will ever have a given generated relid. Each table just declares their relid column as a 64-bit signed int.
+This allows for a global reference to any particular table row, which has some good use cases, such as:
+
+- A stable web url for each object like <appurl>/id/<base62>, which loads the appropriate ui for page the object type.
+  This could be used in emails, bookmarked by the browser, a link in a report, etc.
+- A stable api url like <appurl>/api/<base62>, which delegates to the appropriate service. API users outside your
+  organization can embed these URLs in their own systems, and even translate them into the stable web url to display
+  in emails, reports, etc
+  
+This table allows any kind of objects to be full text search capable. When querying this table, you can limit the set of
+tblid values for a specific subset of tables you wish to search, or just search all of them. Initially, the description
+and search terms can be null. If and when a use case crops up for storing this info for a specific table, it is easy to
+write an SQL update select statement that generates appropriate values for all rows.
+
+Having a JSON column for extra values allows for some flexibility:
+- Users may request an add on feature that is very simple, such as tags that they make up out of their head, like you
+  see on blogs and articles.
+- Maybe in a lot of cases nobody will enter the extra value. You don't have to add a new column for it.
+- If the values should be searchable, they can be part of the search_terms, but they don't have to be in the description.
+- Users may need to create user defined columns. A table can be added to describe these columns, and the JSON can
+  contain the values for cases where these columns have a value.
+- Indexes can be added for specific properties, or all properties.
+
+Having created and modified dates are useful for use cases where need to know when a row was created or modified. I find
+it annoying when there are created and updated dates, where updated is initially null - it just leads to a lot of
+COALESCE(updated, created) calls in queries. By calling it modified and making it initially the same as created, you can
+just use modified to get the most recent change date, regardless of whether the record has ever been updated
+since creation.
+
+Some vendors like Postgres allow inheriting from a parent table, which has some benefits:
+- You don't necessarily need a tblid column, you might have a syntax for that (eg Postgres column tableoid)
+- Each generated relid will only exist in one child table. 
+- No need for trigger logic on child tables to insert, update, or delete from the global data, it is automatic.  
+
+Below is some code to demonstrate these features in Postgres. For simplicity:
+- Uses the default public schema
+- Two tables to give the gist of it
+- Inverted indexes on the terms and extra columns
+- Inheritance
+- Utility function IIF 
+- Functions to translate relid <-> base 62 id
+- Functions to validate JSONB according an expected schema, validate an address or customer
+- Function to save a single customer/address JSONB to both address and customer tables
 ```
-package main
+-- IIF is a useful function on other vendors that Postgres does not have
+-- It takes (e boolean, t ANY, f ANY)
+-- If e is true it returns t, else it returns f
+CREATE OR REPLACE FUNCTION IIF(P_EXPR BOOLEAN, P_TRUE_VAL ANYELEMENT, P_FALSE_VAL ANYELEMENT) RETURNS ANYELEMENT AS
+$$
+  SELECT CASE WHEN P_EXPR THEN P_TRUE_VAL ELSE P_FALSE_VAL END
+$$ LANGUAGE SQL IMMUTABLE LEAKPROOF PARALLEL SAFE;
 
-import "fmt"
+-- Test IIF
+SELECT IIF(true, 'a'::TEXT, 'b'); -- a
+SELECT IIF(false, 'a'::TEXT, 'b'); -- b
 
-func main() {
-  var maxVal uint64
-  maxVal -= 1
-  fmt.Printf("hex = %x\n", maxVal)
+-- BLANK_WS is a version of CONCAT_WS that treats empty strings like nulls.
+CREATE OR REPLACE FUNCTION BLANK_WS(P_SEP TEXT, P_STRS VARIADIC TEXT[] = NULL) RETURNS TEXT AS
+$$
+  SELECT STRING_AGG(strs, P_SEP)
+    FROM (SELECT UNNEST(P_STRS) strs) t
+   WHERE LENGTH(COALESCE(strs, '')) > 0
+$$ LANGUAGE SQL IMMUTABLE LEAKPROOF PARALLEL SAFE;
 
-  var (
-    d rune
-    s string
+-- Test BLANK_WS
+SELECT BLANK_WS('-', null, 'a', '', 'b'); -- a-b
+SELECT BLANK_WS('-', null, null, 'a', '', 'b', '', null, 'c'); -- a-b-c
+
+-- TO_8601 converts a TIMESTAMP into an ISO 8601 string of the form YYYY-MM-DDTHH:MM:SS.sssZ
+-- This is a 24 char string
+CREATE OR REPLACE FUNCTION TO_8601(P_TS TIMESTAMP = NOW() AT TIME ZONE 'UTC') RETURNS VARCHAR(23) AS
+$$
+  SELECT TO_CHAR(COALESCE(P_TS, NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+$$ LANGUAGE SQL IMMUTABLE LEAKPROOF PARALLEL SAFE;
+
+-- Test TO_8601
+SELECT TO_8601() a, TO_8601(NULL) b, TO_8601(NOW() AT TIME ZONE 'UTC' - INTERVAL '1 DAY') c;
+
+            a             |            b             |            c             
+--------------------------+--------------------------+--------------------------
+ 2024-09-24T00:18:51.895Z | 2024-09-24T00:18:51.895Z | 2024-09-23T00:18:51.895Z
+
+-- RELID_TO_ID converts a BIGINT to a base 62 string with a maximum of 11 chars
+CREATE OR REPLACE FUNCTION RELID_TO_ID(P_RELID BIGINT) RETURNS VARCHAR(11) AS
+$$
+DECLARE
+  RELID BIGINT := P_RELID;
+  DIGIT CHAR;
+  ID VARCHAR(11) = '';
+  RMDR INT;
+BEGIN
+  IF RELID = 0 THEN
+    RETURN '0';
+  END IF;
+
+  WHILE RELID > 0 LOOP
+    RMDR  = RELID % 62;
+    CASE
+      WHEN RMDR < 10      THEN DIGIT = CHR(ASCII('0') + RMDR          );
+      WHEN RMDR < 10 + 26 THEN DIGIT = CHR(ASCII('A') + RMDR - 10     );
+      ELSE                     DIGIT = CHR(ASCII('a') + RMDR - 10 - 26);
+    END CASE;
+    
+    -- Add digits to the front of the string, modulus gives us the digits from least to most significant
+    -- Eg for the relid 123, we get the digits 3,2,1
+    ID    = DIGIT || ID;
+    RELID = RELID /  62;
+  END LOOP;
+  
+  RETURN ID;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE LEAKPROOF STRICT PARALLEL SAFE;
+
+-- Test RELID_TO_ID
+
+SELECT trim(to_char(column1, 'FM9_999_999_999_999_999_999'), '_') AS RELID
+      ,RELID_TO_ID(column1) AS ID
+  FROM (VALUES (NULL::BIGINT), (0), (1), (10), (10+25), (10+26), (10+26+25), (10+26+26), (10_000_000_000), (9_223_372_036_854_775_807)) r;
+
+           relid           |     id      
+---------------------------+-------------
+                           |
+ 0                         | 0
+ 1                         | 1
+ 10                        | A
+ 35                        | Z
+ 36                        | a
+ 61                        | z
+ 62                        | 10
+ 10_000_000_000            | Aukyoa
+ 9_223_372_036_854_775_807 | AzL8n0Y58m7
+
+-- ID_TO_RELID converts a base 62 string with a maximum of 11 chars into a BIGINT
+CREATE FUNCTION ID_TO_RELID(P_ID VARCHAR(11)) RETURNS BIGINT AS
+$$
+DECLARE
+  DIGIT CHAR;
+  ASCII_DIGIT INT;
+  RELID BIGINT := 0;
+BEGIN
+  FOREACH DIGIT IN ARRAY regexp_split_to_array(P_ID, '')
+  LOOP
+    -- Postgres database collation may or may not be case sensitive, which affects string comparisons using >= and <=.
+    -- This means that a statement like CASE DIGIT >= 'A' AND DIGIT <= 'Z' will match both both upper and lower case
+    -- letters if the collation is case insensitive.
+    -- Get the ASCII numeric value of the digit so we guarantee a case sensitive comparison regardless of collation. 
+    ASCII_DIGIT = ASCII(DIGIT);
+    RELID = RELID * 62;
+    
+    CASE
+      WHEN ASCII_DIGIT >= ASCII('0') AND ASCII_DIGIT <= ASCII('9') THEN RELID = RELID +           (ASCII_DIGIT - ASCII('0'));
+      WHEN ASCII_DIGIT >= ASCII('A') AND ASCII_DIGIT <= ASCII('Z') THEN RELID = RELID + 10 +      (ASCII_DIGIT - ASCII('A'));
+      ELSE                                                              RELID = RELID + 10 + 26 + (ASCII_DIGIT - ASCII('a'));
+    END CASE;
+  END LOOP;
+  
+  RETURN RELID;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE LEAKPROOF STRICT PARALLEL SAFE;
+
+-- Test ID_TO_RELID
+
+SELECT column1 AS ID
+      ,trim(to_char(ID_TO_RELID(column1), 'FM9_999_999_999_999_999_999'), '_') AS RELID
+  FROM (VALUES (NULL), ('0'), ('1'), ('A'), ('Z'), ('a'), ('z'), ('10'), ('Aukyoa'), ('AzL8n0Y58m7')) r;
+
+     id      |           relid           
+-------------+---------------------------
+             |
+ 0           | 0
+ 1           | 1
+ A           | 10
+ Z           | 35
+ a           | 36
+ z           | 61
+ 10          | 62
+ Aukyoa      | 10_000_000_000
+ AzL8n0Y58m7 | 9_223_372_036_854_775_807
+
+-- Validate a JSONB value is an object, has the specified keys, with the specified types
+-- Returns P_OBJ if it is valid
+-- If the object does not meet the given requirements, an exception is raised
+-- P_CALLER - name of caller function
+-- P_PARAM  - name of caller parameter
+-- P_OBJ    - object to validate
+-- P_SCHEMA - a prototype object such that:
+--            - key names are names of all allowed keys in object
+--            - values are string names of expected types, as returned by jsonb_typeof (except null)
+--            - special values "date" and "datetime" are allowed to indicate that a string must be an ISO 8601 date or datetime
+-- P_REQ    - a list of required key names
+CREATE OR REPLACE FUNCTION VALIDATE_OBJECT(P_CALLER TEXT, P_PARAM TEXT, P_OBJ JSONB, P_SCHEMA JSONB, P_REQ VARIADIC TEXT[] = NULL) RETURNS JSONB AS
+$$
+DECLARE
+  KEYS TEXT;
+BEGIN
+  -- P_CALLER is not null or empty
+  IF NOT LENGTH(COALESCE(P_CALLER, '')) > 0 THEN
+    RAISE EXCEPTION 'P_CALLER must be a non-null non-empty string';
+  END IF;
+  
+  -- P_PARAM is not null or empty
+  IF NOT LENGTH(COALESCE(P_PARAM, '')) > 0 THEN
+    RAISE EXCEPTION '%: P_PARAM must be a non-null non-empty string', P_CALLER;
+  END IF; 
+  
+  -- P_SCHEMA is an object with at least one key
+  IF NOT (
+        JSONB_TYPEOF(COALESCE(P_SCHEMA, 'null'::JSONB)) = 'object'
+    AND (SELECT COUNT(*) FROM JSONB_EACH(P_SCHEMA)) > 0
+  ) THEN
+    RAISE EXCEPTION '%: P_SCHEMA must be a non-null non-empty JSONB object', P_CALLER;
+  END IF;
+  
+  -- P_SCHEMA keys values are all strings returnable by JSONB_TYPEOF (except for the string 'null')
+  SELECT STRING_AGG(k, ', ') INTO KEYS
+    FROM (
+      SELECT key k
+        FROM JSONB_EACH(P_SCHEMA) t
+       WHERE NOT JSONB_TYPEOF(value) = 'string'
+          OR NOT value #>> '{}' = ANY(ARRAY['array', 'object', 'string', 'number', 'boolean', 'date', 'datetime'])
+    ) t;
+  IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
+    RAISE EXCEPTION '%: P_SCHEMA has following keys with values that are not a string = array, object, string, number, boolean, date, or datetime: %', P_CALLER, KEYS;
+  END IF;
+  
+  -- All required keys are part of the schema
+  SELECT STRING_AGG(k, ', ') INTO KEYS
+    FROM (
+      SELECT k
+        FROM UNNEST(P_REQ) k
+      EXCEPT
+      SELECT key
+        FROM JSONB_EACH(P_SCHEMA)
+   ) t;
+  IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
+    RAISE EXCEPTION '%: P_REQ has required keys that are not in the keys of P_SCHEMA: %', P_CALLER, KEYS;
+  END IF;
+  
+  -- P_OBJ is an object
+  IF NOT JSONB_TYPEOF(COALESCE(P_OBJ, 'null'::JSONB)) = 'object' THEN
+    RAISE EXCEPTION '%: P_OBJ must be an non-null JSONB object', P_CALLER;
+  END IF;
+
+  -- All required keys are provided
+  SELECT STRING_AGG(k, ', ') INTO KEYS
+    FROM (
+      SELECT k
+        FROM UNNEST(P_REQ) k
+      EXCEPT
+      SELECT key
+        FROM JSONB_EACH(P_OBJ) t
+       WHERE key = ANY(P_REQ)
+    ) t;
+  IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
+    RAISE EXCEPTION '%: % is missing required keys: %', P_CALLER, P_PARAM, KEYS;
+  END IF;
+  
+  -- No unexpected object keys
+  SELECT STRING_AGG(k, ', ') INTO KEYS
+    FROM (
+      SELECT key k
+        FROM JSONB_EACH(P_OBJ)
+      EXCEPT
+      SELECT key
+        FROM JSONB_EACH(P_SCHEMA) t
+    ) t;
+  IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
+    RAISE EXCEPTION '%: % has unrecognized keys: %', P_CALLER, P_PARAM, KEYS;
+  END IF;
+  
+  -- Expected object keys have correct types
+  SELECT STRING_AGG(CONCAT('expected ', k, ': ', v, '(not ', JSONB_TYPEOF(P_OBJ -> k), ')'), ', ') INTO KEYS
+    FROM (
+      SELECT key k, value #>> '{}' v
+        FROM JSONB_EACH(P_SCHEMA) t
+       WHERE NOT (
+               (value #>> '{}' = 'date'     AND JSONB_TYPEOF(P_OBJ -> key) = 'string' AND P_OBJ -> key #>> '{}' SIMILAR TO '[0-9]{4}-[0-9]{2}-[0-9]{2}')
+               OR
+               (value #>> '{}' = 'datetime' AND JSONB_TYPEOF(P_OBJ -> key) = 'string' AND P_OBJ -> key #>> '{}' SIMILAR TO '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.[0-9]{3}Z')
+               OR 
+               (value #>> '{}' = JSONB_TYPEOF(P_OBJ -> key))
+             )
+    ) t;
+  IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
+    RAISE EXCEPTION '%: %: %', P_CALLER, P_PARAM, KEYS;
+  END IF;
+  
+  RETURN P_OBJ;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+-- Test VALIDATE_OBJECT
+
+-- P_CALLER is null
+SELECT VALIDATE_OBJECT(null, null, null, null);
+
+-- P_CALLER is empty
+SELECT VALIDATE_OBJECT('', null, null, null);
+
+-- P_PARAM is null
+SELECT VALIDATE_OBJECT('CLR', null, null, null);
+
+-- P_PARAM is empty
+SELECT VALIDATE_OBJECT('CLR', '', null, null);
+
+-- P_SCHEMA is null
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, null);
+
+-- P_SCHEMA is empty
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{}');
+
+-- P_SCHEMA key values are not array, object, string, number, boolean, date, or datetime
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": 1}');
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": 1, "bar": "baz"}');
+
+-- P_REQ has key(s) that are not keys of P_SCHEMA
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": "string", "bar": "number"}', 'baz');
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": "string", "bar": "number"}', 'baz', 'foo', 'bazzy');
+
+-- P_OBJ is null
+SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": "string", "bar": "number"}');
+
+-- P_OBJ is not an object
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '[]', '{"foo": "string", "bar": "number"}');
+
+-- P_OBJ is missing required keys
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{}', '{"foo": "string", "bar": "number"}', 'foo');
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": 1}', '{"foo": "string", "bar": "number"}', 'foo', 'bar');
+
+-- P_OBJ has extra keys
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"baz": 1}', '{"foo": "string", "bar": "number"}');
+
+-- P_OBJ has keys with wrong types
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": 1}', '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": 1, "bar": "baz"}', '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"d1": 1, "d2": "", "dt1": true, "dt2": ""}', '{"d1": "date", "d2": "date", "dt1": "datetime", "dt2": "datetime"}');
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"d1": 1, "d2": "2024-09-2", "dt1": true, "dt2": "2024-09-24T08:38:01.23Z"}', '{"d1": "date", "d2": "date", "dt1": "datetime", "dt2": "datetime"}');
+
+-- P_OBJ matches schema
+SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": "baz", "bar": 1, "d": "2024-09-24", "dt": "2024-09-24T08:38:01.234Z"}', '{"foo": "string", "bar": "number", "d": "date", "dt": "datetime"}');
+
+--
+-- GLOBAL DATA
+--
+
+-- Table
+CREATE TABLE IF NOT EXISTS global_data(
+   relid       BIGINT
+  ,description TEXT
+  ,terms       TSVECTOR
+  ,extra       JSONB
+  ,created     TIMESTAMP WITH TIME ZONE
+  ,modified    TIMESTAMP WITH TIME ZONE
+);
+
+-- Sequence for relids
+CREATE SEQUENCE IF NOT EXISTS global_data_relid_seq AS BIGINT;
+
+-- Index on global_data descriptor field for full text searches
+CREATE INDEX IF NOT EXISTS global_data_ix_terms ON global_data USING GIN(terms);
+
+-- Index on extra field for json key value comparisons
+CREATE INDEX IF NOT EXISTS global_data_ix_extra ON global_data USING GIN(extra JSONB_PATH_OPS);
+
+-- Index on created field for created date comparisons
+CREATE INDEX IF NOT EXISTS global_data_ix_created ON global_data (created);
+
+-- Index on created field for modified date comparisons
+CREATE INDEX IF NOT EXISTS global_data_ix_modified ON global_data (modified);
+
+--
+-- ADDRESS
+--
+
+-- Table
+CREATE TABLE IF NOT EXISTS address(
+   line         TEXT
+  ,city         TEXT
+  ,region       TEXT
+  ,country      TEXT
+  ,mailing_code TEXT
+) INHERITS (global_data);
+
+SELECT 'ALTER TABLE address ADD CONSTRAINT address_pk PRIMARY KEY (relid)'
+ WHERE NOT EXISTS (
+   SELECT
+     FROM information_schema.table_constraints
+    WHERE table_schema    = 'public'
+      AND table_name      = 'address'
+      AND constraint_name = 'address_pk'
+ )
+\gexec
+
+--
+-- CUSTOMER
+--
+-- A customer can have at most one address
+--
+
+-- Table
+CREATE TABLE IF NOT EXISTS customer(
+   first_name    TEXT
+  ,last_name     TEXT
+  ,address_relid BIGINT
+) INHERITS (global_data);
+
+SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_pk PRIMARY KEY (relid)'
+ WHERE NOT EXISTS (
+   SELECT
+     FROM information_schema.table_constraints
+    WHERE table_schema    = 'public'
+      AND table_name      = 'customer'
+      AND constraint_name = 'customer_pk'
+ )
+\gexec
+
+-- Address FK
+SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_address_fk FOREIGN KEY (address_relid) REFERENCES address (relid)'
+ WHERE NOT EXISTS (
+   SELECT
+     FROM information_schema.table_constraints
+    WHERE table_schema    = 'public'
+      AND table_name      = 'customer'
+      AND constraint_name = 'customer_address_fk'
+ )
+\gexec
+
+-- VALIDATE_GD
+--
+-- schema = {
+--   id         : string
+--   description: string
+--   terms      : string
+--   extra      : P_EXTRA, which must be NULL or one of "array", "object", or "document"
+--   created    : datetime
+--   modified   : datetime
+-- }
+CREATE OR REPLACE FUNCTION VALIDATE_GD(P_CALLER TEXT, P_PARAM TEXT, P_OBJ JSONB, P_SCHEMA JSONB, P_EXTRA TEXT = NULL, P_REQ TEXT[] = NULL) RETURNS JSONB AS
+$$
+BEGIN
+  IF NOT COALESCE(P_EXTRA, 'document') = ANY(ARRAY['array', 'object', 'document']) THEN
+    RAISE EXCEPTION 'P_EXTRA must NULL or one of ''array'' or ''object'' or ''document''';
+  END IF;
+  
+  RETURN VALIDATE_OBJECT(
+    P_CALLER
+   ,P_PARAM
+   ,P_OBJ
+   ,(P_SCHEMA - 'extra')
+    || jsonb_build_object(
+      'id', 'string'
+     ,'description', 'string'
+     ,'terms', 'string'
+     ,'created', 'datetime'
+     ,'modified', 'datetime'
+    )
+    || IIF(P_EXTRA IS NULL, '{}'::JSONB, jsonb_build_object('extra', P_EXTRA))
+   ,VARIADIC P_REQ
+  );
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+-- Test VALIDATE_GD
+-- P_EXTRA is incorrect type
+SELECT VALIDATE_GD(NULL, NULL, NULL, NULL, 'string', NULL);
+
+-- Extra not allowed
+SELECT VALIDATE_GD('VALIDATE_X', 'P_X', '{"extra": "stuff"}', '{}');
+
+-- Extra allowed as document, but string passed
+SELECT VALIDATE_GD('VALIDATE_X', 'P_X', '{"extra": "document"}', '{"extra": "string"}');
+
+-- All GD values passed, no extra
+SELECT VALIDATE_GD('VALIDATE_X', 'P_X', '{"id": "1", "description": "d", "terms": "t", "created": "2024-09-24T20:07:00.000Z", "modified": "2024-09-24T20:07:00.000Z", "name": "dude", "name": "dude"}', '{"name": "string"}');
+
+-- VALIDATE_ADDRESS
+--
+-- schema = {
+--    line        : string
+--   ,city        : string
+--   ,region      : string
+--   ,country     : string
+--   ,mailing_code: string
+-- }
+--
+-- Required: line, city, country
+CREATE OR REPLACE FUNCTION VALIDATE_ADDRESS(P_ADDRESS JSONB) RETURNS JSONB AS
+$$
+  SELECT VALIDATE_OBJECT(
+     'VALIDATE_ADDRESS'
+    ,'P_ADDRESS'
+    ,P_ADDRESS
+    ,'{"id": "string", "description": "string", "terms": "string", "created": "datetime", "modified": "datetime", line": "string", "city": "string", "region" : "string", "country": "string", "mailing_code": "string"}'
+    ,'line', 'city', 'country'
+  );
+$$ LANGUAGE SQL IMMUTABLE PARALLEL SAFE;
+
+-- VALIDATE_CUSTOMER_ADDRESS
+--
+-- schema = {
+--    firstName: string
+--   ,lastName : string
+--   ,address  : VALIDATE_ADDRESS("address")
+-- }
+CREATE OR REPLACE FUNCTION VALIDATE_CUSTOMER_ADDRESS(P_CUSTOMER_ADDRESS JSONB) RETURNS JSONB AS
+$$
+  WITH GET_ADDR AS (
+    SELECT P_CUSTOMER_ADDRESS -> 'address' addr
   )
+ ,VAL_ADDR AS (
+    SELECT CASE WHEN addr IS NULL THEN P_CUSTOMER_ADDRESS ELSE P_CUSTOMER_ADDRESS || jsonb_build_object('address', VALIDATE_ADDRESS(addr)) END v_addr
+      FROM GET_ADDR t
+  )
+  SELECT VALIDATE_OBJECT(
+     'VALIDATE_CUSTOMER_ADDRESS'
+    ,'P_CUSTOMER_ADDRESS'
+    ,(SELECT v_addr FROM VAL_ADDR)
+    ,'{"id": "string", "firstName": "string", "lastName":"string", "address": "object"}'
+    ,'firstName', 'lastName'
+  );
+$$ LANGUAGE SQL IMMUTABLE PARALLEL SAFE;
 
-  for v := maxVal; v > 0; v = v / 62 {
-    r := v % 62
-    switch {
-    case r < 10:
-      d = '0' + rune(r)
-    case r < 10+26:
-      d = 'A' + rune(r-10)
-    default:
-      d = 'a' + rune(r-10-26)
-    }
-    s = string(d) + s
-  }
+-- Test VALIDATE_CUSTOMER_ADDRESS
+-- Success
+SELECT VALIDATE_CUSTOMER_ADDRESS('{"id": "abcd", "firstName": "Jane", "lastName": "Doe"}');
+SELECT VALIDATE_CUSTOMER_ADDRESS('{"firstName": "Jane", "lastName": "Doe", "address": {"line": "123 Sesame St", "city": "New York", "country": "USA"}}');
+-- Failure
+SELECT VALIDATE_CUSTOMER_ADDRESS('{"firstName": "Jane"}');
+SELECT VALIDATE_CUSTOMER_ADDRESS('{"firstName": "Jane", "lastName": "Doe", "address": {}}');
 
-  fmt.Printf("base62 = %s\n", s)
+--
+-- UPSERT ONE CUSTOMER AND optional ADDRESS
+-- SEE VALIDATE_CUSTOMER_ADDRESS for schema
+--
+CREATE OR REPLACE FUNCTION SAVE_CUSTOMER_ADDRESS(P_CUST_ADDR JSONB) RETURNS VARCHAR(11) AS
+$$
+BEGIN
+  -- Validate customer and optional address
+  WITH VALIDATED AS (
+    SELECT VALIDATE_CUSTOMER_ADDRESS(P_CUST_ADDR) cust_addr
+  )
+ ,ADDR_FIELDS AS (
+    -- ADDRESS
+    --
+    -- The WHERE cust_addr ? 'address' is only true if an address exists,
+    -- causing this query to return zero rows if there is no address,
+    -- and one row if there is an address
+    --
+    -- COALESCE only evaluates second expression if the first is non-null
+    -- If the address has no id, then:
+    -- - addr #>> '{"id"}' is null
+    -- - ID_TO_RELID is null
+    -- - NEXTVAL is evaluated to get next sequence value
+    -- Otherwise, if the address has an id:
+    -- - addr #>> '{"id"}' is non-null
+    -- - ID_TO_RELID converts the base 62 id into a non-null relid
+    -- - NEXTVAL is not evaluated, the sequence does not advance
+    --
+    SELECT COALESCE(
+             ID_TO_RELID(addr #>> '{"id"}')
+            ,NEXTVAL('global_data_relid_seq')
+           )                           addr_relid
+          ,addr #>> '{"line"}'         addr_line
+          ,addr #>> '{"city"}'         addr_city
+          ,addr #>> '{"region"}'       addr_region
+          ,addr #>> '{"country"}'      addr_country
+          ,addr #>> '{"mailing_code"}' addr_mailing_code
+      FROM (SELECT cust_addr -> 'address' addr
+              FROM VALIDATED
+             WHERE cust_addr ? 'address'
+           ) t
+  )
+ ,ADDR_DESC AS (
+    SELECT BLANK_WS(
+             ' '
+            ,addr_line
+            ,addr_city
+            ,addr_region
+            ,addr_country
+            ,addr_mailing_code
+           ) addr_desc
+      FROM ADDR_FIELDS
+  )
+ ,ADDR_TERMS AS (
+    SELECT TO_TSVECTOR(addr_desc) addr_terms
+      FROM ADDR_DESC
+  )
+  -- All address fields
+ ,ADDR AS (
+    SELECT *
+      FROM ADDR_FIELDS
+          ,ADDR_DESC
+          ,ADDR_TERMS
+  )   
+ ,CUST_FIELDS AS (
+   -- CUSTOMER
+   -- There must be a customer, so this query always returns one row
+   SELECT COALESCE(
+            ID_TO_RELID(cust_addr #>> '{"id"}')
+           ,NEXTVAL('global_data_relid_seq')
+          )                              cust_relid
+         ,cust_addr #>> '{"firstName"}'  cust_first_name
+         ,cust_addr #>> '{"lastName"}'   cust_last_name
+     FROM VALIDATED
+  )
+ ,CUST_DESC AS (
+   SELECT BLANK_WS(
+            ' '
+           ,first_name
+           ,last_name
+          ) cust_desc
+     FROM CUST
+  )
+ ,CUST_TERMS AS (
+   SELECT TO_TSVECTOR(cust_desc)
+     FROM CUST_DESC
+  )
+  -- All customer fields
+ ,CUST AS (
+    SELECT *
+      FROM CUST_FIELDS
+          ,CUST_DESC
+          ,CUST_TERMS
+  )
+ ,CT AS (
+    SELECT current_timestamp ct
+  )
+  -- Insert the child address if one exists
+ ,INS_ADDR AS (  
+   INSERT INTO address(
+      relid
+     ,description
+     ,terms
+     ,created
+     ,modified
+     ,line
+     ,city
+     ,region
+     ,country
+     ,mailing_code
+   ) SELECT addr_relid
+           ,addr_desc
+           ,addr_terms
+           ,ct
+           ,ct
+           ,addr_line
+           ,addr_city
+           ,addr_region
+           ,addr_country
+           ,addr_mailing_code
+      FROM ADDR
+          ,CT
+   )
+   ON CONFLICT (relid) DO
+   UPDATE SET description  = addr_desc
+             ,terms        = addr_terms
+             ,modified     = ct
+             ,line         = addr_line
+             ,city         = addr_city
+             ,region       = addr_region
+             ,country      = addr_country
+             ,mailing_code = addr_mailing_code
+   -- Convert addr_relid to an id, in case the provided address did not have an id
+   RETURNING RELID_TO_ID(addr_relid)
+  )
+ ,INS_CUST AS (
+    INSERT INTO customer (
+      relid
+     ,description
+     ,terms
+     ,created
+     ,modified
+     ,first_name
+     ,last_name
+     ,address_relid
+   ) SELECT cust_relid
+           ,cust_terms
+           ,ct
+           ,ct
+           ,cust_first_name
+           ,cust_last_name
+           ,(SELECT addr_relid FROM ADDR)
+       FROM CUST
+   RETURNING RELID_TO_ID(cust_relid)
+  )
+  -- Return original object provided, with some modifications:
+  -- - If any id is missing, the generated id is returned
+  -- - If any updated date is replaced the current date 
+ ,SELECT cust_addr
+    FROM VALIDATED
+END;
+$$ LANGUAGE plpgsql;
 
-  var val uint64
-  for _, chr := range s {
-    val = val * 62
-    switch {
-    case chr >= '0' && chr <= '9':
-      val += uint64(chr - '0')
-    case chr >= 'A' && chr <= 'Z':
-      val += 10 + uint64(chr-'A')
-    default:
-      val += 10 + 26 + uint64(chr-'a')
-    }
-  }
-  fmt.Printf("hex = %x\n", val)
-}
-```
+insert into address(description, terms, extra, created, modified, line, city, region, country)
+values(
+   '123 Sesame St, New York, NY, USA 12345'
+  ,TO_TSVECTOR('123 Sesame St, NY, NY, USA 12345')
+  ,null
+  ,current_timestamp
+  ,current_timestamp
+  ,'123 Sesame St'
+  ,'New York'
+  ,'NY'
+  ,'USA'
+);
 
-
-If you need to, you can define a shared full text search table, which has:
-- tblid:        Your vendor may have a specific type for table ids (eg Postgres OID), or just use a string
-- relid:        Primary key
-- description:  A human readable string that would look good in one of those combo filter box and drop down widgets. 
-- search_terms: Your vendor may have a specific type for this (eg Postgres TSVECTOR)
-
-The point of this table is to allow different kinds of objects to be full text search capable. When querying this table,
-you can limit the set of tbl_id values for a specific subset of tables you wish to search, or just search all of them.
-
-Any back end language will have support for JSON, obviously your browser supports it natively. One particularly good
-benefit of a JSON interface is that you ddon't need an ORM: just use the JSON decoder of your language to decode the
-JSON into object(s), and vice-versa. This simplifies the application layer, especially when multiple languages are used.
-
-
+insert into customer(description, terms, extra, created, modified, first_name, last_name, address_relid)
+values (
+   'John James Doe'
+  ,TO_TSVECTOR('John James Doe')
+  ,jsonb_build_object('tags', jsonb_build_array('tag1', 'tag2'))
+  ,current_timestamp
+  ,current_timestamp
+  ,'John'
+  ,'Doe'
+  ,1
+);
  
+```
