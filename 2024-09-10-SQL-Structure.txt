@@ -137,6 +137,92 @@ Below is some code to demonstrate these features in Postgres. For simplicity:
 - Functions to validate JSONB according an expected schema, validate an address or customer
 - Function to save a single customer/address JSONB to both address and customer tables
 ```
+--
+-- GLOBAL DATA
+--
+
+-- Table
+CREATE TABLE IF NOT EXISTS global_data(
+   relid       BIGINT
+  ,description TEXT
+  ,terms       TSVECTOR
+  ,extra       JSONB
+  ,created     TIMESTAMP WITH TIME ZONE
+  ,modified    TIMESTAMP WITH TIME ZONE
+);
+
+-- Sequence for relids
+CREATE SEQUENCE IF NOT EXISTS global_data_relid_seq AS BIGINT;
+
+-- Index on global_data descriptor field for full text searches
+CREATE INDEX IF NOT EXISTS global_data_ix_terms ON global_data USING GIN(terms);
+
+-- Index on extra field for json key value comparisons
+CREATE INDEX IF NOT EXISTS global_data_ix_extra ON global_data USING GIN(extra JSONB_PATH_OPS);
+
+-- Index on created field for created date comparisons
+CREATE INDEX IF NOT EXISTS global_data_ix_created ON global_data (created);
+
+-- Index on created field for modified date comparisons
+CREATE INDEX IF NOT EXISTS global_data_ix_modified ON global_data (modified);
+
+--
+-- ADDRESS
+--
+
+-- Table
+CREATE TABLE IF NOT EXISTS address(
+   line         TEXT
+  ,city         TEXT
+  ,region       TEXT
+  ,country      TEXT
+  ,mailing_code TEXT
+) INHERITS (global_data);
+
+SELECT 'ALTER TABLE address ADD CONSTRAINT address_pk PRIMARY KEY (relid)'
+ WHERE NOT EXISTS (
+   SELECT
+     FROM information_schema.table_constraints
+    WHERE table_schema    = 'public'
+      AND table_name      = 'address'
+      AND constraint_name = 'address_pk'
+ )
+\gexec
+
+--
+-- CUSTOMER
+--
+-- A customer can have at most one address
+--
+
+-- Table
+CREATE TABLE IF NOT EXISTS customer(
+   first_name    TEXT
+  ,last_name     TEXT
+  ,address_relid BIGINT
+) INHERITS (global_data);
+
+SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_pk PRIMARY KEY (relid)'
+ WHERE NOT EXISTS (
+   SELECT
+     FROM information_schema.table_constraints
+    WHERE table_schema    = 'public'
+      AND table_name      = 'customer'
+      AND constraint_name = 'customer_pk'
+ )
+\gexec
+
+-- Address FK
+SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_address_fk FOREIGN KEY (address_relid) REFERENCES address (relid)'
+ WHERE NOT EXISTS (
+   SELECT
+     FROM information_schema.table_constraints
+    WHERE table_schema    = 'public'
+      AND table_name      = 'customer'
+      AND constraint_name = 'customer_address_fk'
+ )
+\gexec
+
 -- IIF is a useful function on other vendors that Postgres does not have
 -- It takes (e boolean, t ANY, f ANY)
 -- If e is true it returns t, else it returns f
@@ -149,7 +235,7 @@ $$ LANGUAGE SQL IMMUTABLE LEAKPROOF PARALLEL SAFE;
 SELECT IIF(true, 'a'::TEXT, 'b'); -- a
 SELECT IIF(false, 'a'::TEXT, 'b'); -- b
 
--- BLANK_WS is a version of CONCAT_WS that treats empty strings like nulls.
+-- BLANK_WS is a version of CONCAT_WS that treats empty strings like nulls, and coalesces consecutive empty/nulls
 CREATE OR REPLACE FUNCTION BLANK_WS(P_SEP TEXT, P_STRS VARIADIC TEXT[] = NULL) RETURNS TEXT AS
 $$
   SELECT STRING_AGG(strs, P_SEP)
@@ -159,11 +245,13 @@ $$ LANGUAGE SQL IMMUTABLE LEAKPROOF PARALLEL SAFE;
 
 -- Test BLANK_WS
 SELECT BLANK_WS('-', null, 'a', '', 'b'); -- a-b
-SELECT BLANK_WS('-', null, null, 'a', '', 'b', '', null, 'c'); -- a-b-c
+SELECT BLANK_WS('-', null, null, 'a', '', '', 'b', '', null, 'c'); -- a-b-c
 
--- TO_8601 converts a TIMESTAMP into an ISO 8601 string of the form YYYY-MM-DDTHH:MM:SS.sssZ
+-- TO_8601 converts a TIMESTAMP into an ISO 8601 string of the form
+-- YYYY-MM-DDTHH:MM:SS.sssZ
+-- 123456789012345678901234
 -- This is a 24 char string
-CREATE OR REPLACE FUNCTION TO_8601(P_TS TIMESTAMP = NOW() AT TIME ZONE 'UTC') RETURNS VARCHAR(23) AS
+CREATE OR REPLACE FUNCTION TO_8601(P_TS TIMESTAMP = NOW() AT TIME ZONE 'UTC') RETURNS VARCHAR(24) AS
 $$
   SELECT TO_CHAR(COALESCE(P_TS, NOW() AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 $$ LANGUAGE SQL IMMUTABLE LEAKPROOF PARALLEL SAFE;
@@ -276,14 +364,13 @@ SELECT column1 AS ID
 -- Returns P_OBJ if it is valid
 -- If the object does not meet the given requirements, an exception is raised
 -- P_CALLER - name of caller function
--- P_PARAM  - name of caller parameter
 -- P_OBJ    - object to validate
 -- P_SCHEMA - a prototype object such that:
 --            - key names are names of all allowed keys in object
 --            - values are string names of expected types, as returned by jsonb_typeof (except null)
 --            - special values "date" and "datetime" are allowed to indicate that a string must be an ISO 8601 date or datetime
 -- P_REQ    - a list of required key names
-CREATE OR REPLACE FUNCTION VALIDATE_OBJECT(P_CALLER TEXT, P_PARAM TEXT, P_OBJ JSONB, P_SCHEMA JSONB, P_REQ VARIADIC TEXT[] = NULL) RETURNS JSONB AS
+CREATE OR REPLACE FUNCTION VALIDATE_OBJECT(P_CALLER TEXT, P_OBJ JSONB, P_SCHEMA JSONB, P_REQ VARIADIC TEXT[] = NULL) RETURNS JSONB AS
 $$
 DECLARE
   KEYS TEXT;
@@ -292,11 +379,6 @@ BEGIN
   IF NOT LENGTH(COALESCE(P_CALLER, '')) > 0 THEN
     RAISE EXCEPTION 'P_CALLER must be a non-null non-empty string';
   END IF;
-  
-  -- P_PARAM is not null or empty
-  IF NOT LENGTH(COALESCE(P_PARAM, '')) > 0 THEN
-    RAISE EXCEPTION '%: P_PARAM must be a non-null non-empty string', P_CALLER;
-  END IF; 
   
   -- P_SCHEMA is an object with at least one key
   IF NOT (
@@ -347,7 +429,7 @@ BEGIN
        WHERE key = ANY(P_REQ)
     ) t;
   IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
-    RAISE EXCEPTION '%: % is missing required keys: %', P_CALLER, P_PARAM, KEYS;
+    RAISE EXCEPTION '%: P_OBJ missing required keys: %', P_CALLER, KEYS;
   END IF;
   
   -- No unexpected object keys
@@ -360,7 +442,7 @@ BEGIN
         FROM JSONB_EACH(P_SCHEMA) t
     ) t;
   IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
-    RAISE EXCEPTION '%: % has unrecognized keys: %', P_CALLER, P_PARAM, KEYS;
+    RAISE EXCEPTION '%: P_OBJ has unrecognized keys: %', P_CALLER, KEYS;
   END IF;
   
   -- Expected object keys have correct types
@@ -377,7 +459,7 @@ BEGIN
              )
     ) t;
   IF NOT LENGTH(COALESCE(KEYS, '')) = 0 THEN
-    RAISE EXCEPTION '%: %: %', P_CALLER, P_PARAM, KEYS;
+    RAISE EXCEPTION '%: P_OBJ: %', P_CALLER, KEYS;
   END IF;
   
   RETURN P_OBJ;
@@ -387,138 +469,46 @@ $$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 -- Test VALIDATE_OBJECT
 
 -- P_CALLER is null
-SELECT VALIDATE_OBJECT(null, null, null, null);
+SELECT VALIDATE_OBJECT(null, null, null);
 
 -- P_CALLER is empty
-SELECT VALIDATE_OBJECT('', null, null, null);
-
--- P_PARAM is null
-SELECT VALIDATE_OBJECT('CLR', null, null, null);
-
--- P_PARAM is empty
-SELECT VALIDATE_OBJECT('CLR', '', null, null);
+SELECT VALIDATE_OBJECT('', null, null);
 
 -- P_SCHEMA is null
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, null);
+SELECT VALIDATE_OBJECT('CLR', null, null);
 
 -- P_SCHEMA is empty
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{}');
+SELECT VALIDATE_OBJECT('CLR', null, '{}');
 
 -- P_SCHEMA key values are not array, object, string, number, boolean, date, or datetime
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": 1}');
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": 1, "bar": "baz"}');
+SELECT VALIDATE_OBJECT('CLR', null, '{"foo": 1}');
+SELECT VALIDATE_OBJECT('CLR', null, '{"foo": 1, "bar": "baz"}');
 
 -- P_REQ has key(s) that are not keys of P_SCHEMA
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": "string", "bar": "number"}', 'baz');
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": "string", "bar": "number"}', 'baz', 'foo', 'bazzy');
+SELECT VALIDATE_OBJECT('CLR', null, '{"foo": "string", "bar": "number"}', 'baz');
+SELECT VALIDATE_OBJECT('CLR', null, '{"foo": "string", "bar": "number"}', 'baz', 'foo', 'bazzy');
 
 -- P_OBJ is null
-SELECT VALIDATE_OBJECT('CLR', 'PRM', null, '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', null, '{"foo": "string", "bar": "number"}');
 
 -- P_OBJ is not an object
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '[]', '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', '[]', '{"foo": "string", "bar": "number"}');
 
 -- P_OBJ is missing required keys
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{}', '{"foo": "string", "bar": "number"}', 'foo');
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": 1}', '{"foo": "string", "bar": "number"}', 'foo', 'bar');
+SELECT VALIDATE_OBJECT('CLR', '{}', '{"foo": "string", "bar": "number"}', 'foo');
+SELECT VALIDATE_OBJECT('CLR', '{"foo": 1}', '{"foo": "string", "bar": "number"}', 'foo', 'bar');
 
 -- P_OBJ has extra keys
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"baz": 1}', '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', '{"baz": 1}', '{"foo": "string", "bar": "number"}');
 
 -- P_OBJ has keys with wrong types
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": 1}', '{"foo": "string", "bar": "number"}');
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": 1, "bar": "baz"}', '{"foo": "string", "bar": "number"}');
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"d1": 1, "d2": "", "dt1": true, "dt2": ""}', '{"d1": "date", "d2": "date", "dt1": "datetime", "dt2": "datetime"}');
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"d1": 1, "d2": "2024-09-2", "dt1": true, "dt2": "2024-09-24T08:38:01.23Z"}', '{"d1": "date", "d2": "date", "dt1": "datetime", "dt2": "datetime"}');
+SELECT VALIDATE_OBJECT('CLR', '{"foo": 1}', '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', '{"foo": 1, "bar": "baz"}', '{"foo": "string", "bar": "number"}');
+SELECT VALIDATE_OBJECT('CLR', '{"d1": 1, "d2": "", "dt1": true, "dt2": ""}', '{"d1": "date", "d2": "date", "dt1": "datetime", "dt2": "datetime"}');
+SELECT VALIDATE_OBJECT('CLR', '{"d1": 1, "d2": "2024-09-2", "dt1": true, "dt2": "2024-09-24T08:38:01.23Z"}', '{"d1": "date", "d2": "date", "dt1": "datetime", "dt2": "datetime"}');
 
 -- P_OBJ matches schema
-SELECT VALIDATE_OBJECT('CLR', 'PRM', '{"foo": "baz", "bar": 1, "d": "2024-09-24", "dt": "2024-09-24T08:38:01.234Z"}', '{"foo": "string", "bar": "number", "d": "date", "dt": "datetime"}');
-
---
--- GLOBAL DATA
---
-
--- Table
-CREATE TABLE IF NOT EXISTS global_data(
-   relid       BIGINT
-  ,description TEXT
-  ,terms       TSVECTOR
-  ,extra       JSONB
-  ,created     TIMESTAMP WITH TIME ZONE
-  ,modified    TIMESTAMP WITH TIME ZONE
-);
-
--- Sequence for relids
-CREATE SEQUENCE IF NOT EXISTS global_data_relid_seq AS BIGINT;
-
--- Index on global_data descriptor field for full text searches
-CREATE INDEX IF NOT EXISTS global_data_ix_terms ON global_data USING GIN(terms);
-
--- Index on extra field for json key value comparisons
-CREATE INDEX IF NOT EXISTS global_data_ix_extra ON global_data USING GIN(extra JSONB_PATH_OPS);
-
--- Index on created field for created date comparisons
-CREATE INDEX IF NOT EXISTS global_data_ix_created ON global_data (created);
-
--- Index on created field for modified date comparisons
-CREATE INDEX IF NOT EXISTS global_data_ix_modified ON global_data (modified);
-
---
--- ADDRESS
---
-
--- Table
-CREATE TABLE IF NOT EXISTS address(
-   line         TEXT
-  ,city         TEXT
-  ,region       TEXT
-  ,country      TEXT
-  ,mailing_code TEXT
-) INHERITS (global_data);
-
-SELECT 'ALTER TABLE address ADD CONSTRAINT address_pk PRIMARY KEY (relid)'
- WHERE NOT EXISTS (
-   SELECT
-     FROM information_schema.table_constraints
-    WHERE table_schema    = 'public'
-      AND table_name      = 'address'
-      AND constraint_name = 'address_pk'
- )
-\gexec
-
---
--- CUSTOMER
---
--- A customer can have at most one address
---
-
--- Table
-CREATE TABLE IF NOT EXISTS customer(
-   first_name    TEXT
-  ,last_name     TEXT
-  ,address_relid BIGINT
-) INHERITS (global_data);
-
-SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_pk PRIMARY KEY (relid)'
- WHERE NOT EXISTS (
-   SELECT
-     FROM information_schema.table_constraints
-    WHERE table_schema    = 'public'
-      AND table_name      = 'customer'
-      AND constraint_name = 'customer_pk'
- )
-\gexec
-
--- Address FK
-SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_address_fk FOREIGN KEY (address_relid) REFERENCES address (relid)'
- WHERE NOT EXISTS (
-   SELECT
-     FROM information_schema.table_constraints
-    WHERE table_schema    = 'public'
-      AND table_name      = 'customer'
-      AND constraint_name = 'customer_address_fk'
- )
-\gexec
+SELECT VALIDATE_OBJECT('CLR', '{"foo": "baz", "bar": 1, "d": "2024-09-24", "dt": "2024-09-24T08:38:01.234Z"}', '{"foo": "string", "bar": "number", "d": "date", "dt": "datetime"}');
 
 -- VALIDATE_GD
 --
@@ -526,30 +516,31 @@ SELECT 'ALTER TABLE customer ADD CONSTRAINT customer_address_fk FOREIGN KEY (add
 --   id         : string
 --   description: string
 --   terms      : string
---   extra      : P_EXTRA, which must be NULL or one of "array", "object", or "document"
+--   extra      : "array", "object", or "document"
 --   created    : datetime
 --   modified   : datetime
 -- }
-CREATE OR REPLACE FUNCTION VALIDATE_GD(P_CALLER TEXT, P_PARAM TEXT, P_OBJ JSONB, P_SCHEMA JSONB, P_EXTRA TEXT = NULL, P_REQ TEXT[] = NULL) RETURNS JSONB AS
+CREATE OR REPLACE FUNCTION VALIDATE_GD(P_CALLER TEXT, P_OBJ JSONB, P_SCHEMA JSONB, P_REQ TEXT[] = NULL) RETURNS JSONB AS
 $$
+DECLARE
+  EXTRA_TYP TEXT := P_SCHEMA #>> '{"extra"}';
 BEGIN
-  IF NOT COALESCE(P_EXTRA, 'document') = ANY(ARRAY['array', 'object', 'document']) THEN
-    RAISE EXCEPTION 'P_EXTRA must NULL or one of ''array'' or ''object'' or ''document''';
+  IF NOT COALESCE(EXTRA_TYP, 'document') = ANY(ARRAY['array', 'object', 'document']) THEN
+    RAISE EXCEPTION 'P_SCHEMA -> extra must be NULL or one of ''array'' or ''object'' or ''document''';
   END IF;
   
   RETURN VALIDATE_OBJECT(
     P_CALLER
-   ,P_PARAM
    ,P_OBJ
    ,(P_SCHEMA - 'extra')
+    || IIF(EXTRA_TYP IS NULL, '{}'::JSONB, jsonb_build_object('extra', EXTRA_TYP))
     || jsonb_build_object(
-      'id', 'string'
-     ,'description', 'string'
-     ,'terms', 'string'
-     ,'created', 'datetime'
-     ,'modified', 'datetime'
+      'id'         ,'string'
+     ,'description','string'
+     ,'terms'      ,'string'
+     ,'created'    ,'datetime'
+     ,'modified'   ,'datetime'
     )
-    || IIF(P_EXTRA IS NULL, '{}'::JSONB, jsonb_build_object('extra', P_EXTRA))
    ,VARIADIC P_REQ
   );
 END;
@@ -557,16 +548,16 @@ $$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 
 -- Test VALIDATE_GD
 -- P_EXTRA is incorrect type
-SELECT VALIDATE_GD(NULL, NULL, NULL, NULL, 'string', NULL);
+SELECT VALIDATE_GD('CLR', NULL, '{"extra": "dude"}');
 
 -- Extra not allowed
-SELECT VALIDATE_GD('VALIDATE_X', 'P_X', '{"extra": "stuff"}', '{}');
+SELECT VALIDATE_GD('CLR', '{"extra": "stuff"}', '{}');
 
 -- Extra allowed as document, but string passed
-SELECT VALIDATE_GD('VALIDATE_X', 'P_X', '{"extra": "document"}', '{"extra": "string"}');
+SELECT VALIDATE_GD('CLR', '{"extra": "dude"}', '{"extra": "document"}');
 
 -- All GD values passed, no extra
-SELECT VALIDATE_GD('VALIDATE_X', 'P_X', '{"id": "1", "description": "d", "terms": "t", "created": "2024-09-24T20:07:00.000Z", "modified": "2024-09-24T20:07:00.000Z", "name": "dude", "name": "dude"}', '{"name": "string"}');
+SELECT VALIDATE_GD('VALIDATE_X', '{"id": "1", "description": "d", "terms": "t", "created": "2024-09-24T20:07:00.000Z", "modified": "2024-09-24T20:07:00.000Z", "name": "dude", "name": "dude"}', '{"name": "string"}');
 
 -- VALIDATE_ADDRESS
 --
