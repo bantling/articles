@@ -617,6 +617,59 @@ SELECT VALIDATE_ADDRESS('{"line": "123 Sesame St", "city": "New York", "region":
 -- All global data except extra
 SELECT VALIDATE_ADDRESS('{"id": "a", "description": "desc", "terms": "tms", "created": "2024-09-26T09:08:00.000Z", "modified": "2024-09-26T09:08:00.000Z", "line": "123 Sesame St", "city": "New York", "region": "NY", "country": "USA", "mailing_code": "12345"}');
 
+-- GET_GD_COLS
+--
+-- Get the global data cols from a JSONB object
+-- If no id is provided, get the next id from the sequence
+-- If the terms are not provided, fall back on the description
+-- Ignore provided created or modified dates 
+CREATE OR REPLACE FUNCTION GET_GD_COLS(P_OBJ JSONB) RETURNS TABLE (
+  relid bigint
+ ,description TEXT
+ ,terms TEXT
+ ,extra JSONB
+) AS
+$$
+  WITH COLS AS (
+    SELECT COALESCE(
+             ID_TO_RELID(gd #>> '{"id"}')
+            ,NEXTVAL('global_data_relid_seq')
+           )                        relid
+          ,gd #>> '{"description"}' description
+          ,gd #>> '{"terms"}'       terms
+          ,gd #>> '{"extra"}'       extra
+      FROM VALIDATE_GD(P_OBJ) gd
+  )
+  SELECT relid
+        ,description
+        ,COALESCE(terms, description) terms
+        ,extra
+    FROM COLS c
+$$ LANGUAGE SQL IMMUTABLE;
+
+-- Test GET_GD_COLS
+-- No id, terms, or extra
+SELECT GET_GD_COLS('{"id": "1", "description": "abc"}');
+
+CREATE OR REPLACE FUNCTION SAVE_ADDRESS(P_ADDRESS JSONB) RETURNS JSONB AS
+$$
+  WITH VALIDATED AS (
+    SELECT VALIDATE_ADDRESS(P_ADDRESS) addr
+  )
+ ,ADDR_COLS AS (
+    SELECT *
+          ,addr #>> '{"line"}'         line
+          ,addr #>> '{"city"}'         city
+          ,addr #>> '{"region"}'       region
+          ,addr #>> '{"country"}'      country
+          ,addr #>> '{"mailing_code"}' mailing_code
+      FROM VALIDATED
+          ,
+  )
+ ,ADDR_SET AS (
+    SELECT *
+          ,COALESCE(addr #>> '{"terms"}', description)
+          
 -- VALIDATE_CUSTOMER_ADDRESS
 --
 -- schema = {
