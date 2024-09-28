@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= A simpler alternative to microservices
+
+== Issues a team I used to work with encountered
+
+I worked with a team who decided to use a microservices approach, that worked as follows:
+
+- Chose Go over Java because "Java isn't ready for microservices, as Spring and JPA take over 200MB of memory"
+- Use Go net/http for HTTP server with a mux added
+- Use Go database/sql with hand written queries, no orm
+- A separate git repo for each service
+- A separate container for each service
+- Postgres database
+- Redis to cache query results
+- Elasticsearch for full text searching in one of those text/select combo widgets where users can type and see results
+  on the fly to select from.
+- Logstash to populate Elasticsearch
+- Swagger to generate a proxy that sits in front of all the services, so the HTML/JS client connects to only one service
+
+Most of these points were not helpful or unnecessary:
+
+- Contrary to popular opinion, Java does not require using Sprinng or JPA. the JRE comes with HttpHandler and JDBC,
+  which are roughly equivalent to the above Go built in packages
+- Devs can't be bothered to check out all repos once there are too many to bother with
+- Since sometimes service A calls service B, each service needs access to all objects that are converted to/fromm JSON,
+  which leads to a separate repo for object definitions
+- A dev working on service B might not have service A checked out. Even if he did, modifying the object definition of B
+  won't show a compile error in service A until A is updated to latest object definitions. This leads to spending a lot
+  of time figuring out why occasionally B objects are missing some data.
+- Devs were writing code that would check Redis for data, if not found, query Postgres and store it in Redis, despite
+  the fact the database would only get about 10,000 rows inserted per year, which is nothing for an SQL database
+- Logstash selects data from Postgres to insert into Elasticsearch. If data is deleted in Postgres, you have to find
+  some way to select deleted data (eg a trigger that inserts a table name and key into a deletions table)
+- Eventually, both Go and Java were used, but Swagger for Go would choke on certain legal constructs due to the Go
+  Swagger community being much smaller with fewer resources, requiring a workaround that made things harder in the UI
+- Without any real knowledge of service dependencies or tooling, every container would need to be deployed every time
+- There was no fault tolerance, if a service goes down that some other service needs, that other service would also fail
+
+Effectively, we had a distributed monolith. A far better, more useful approach would be to simply admit a monolith is
+perfectly ok. A monolith doesn't have to mean having only one code base in one language - a hybrid approach can be used
+to achieve a monolithic deployment in the sense of always deploying all the code, but still decomposing it into
+separate services.
+
+Here is an example of a simpler system, that is probably useful in a lot of similar cases:
+
+- Have one repo with top level directories for each service, and one for object definitions
+- Use events instead of HTTP when services communicate to each other. If the services are in the same language, then
+  the event can be received directly in the same process, otherwise a stub receiver can use HTTP.
+- If you have multiple languages, that does not mean you need multiple containers or a proxy. A single container can run
+  each language as a separate process with a separate port, and the JS client to connect to the appropriate port for
+  each service.
+- Use a simple code generator that takes a TOML file to generate an object definition, a service, an HTTP event stub for
+  each language, and a JS client.
+- Use a simple build system that compiles all or a chosen subset of service directories. For each service, the compiler
+  only sees that one service and all object definitions. This catches cases of a service directly calling the code of
+  another service, rather than communicating via events as expected.
+- Generate a Containerfile for a chosen subset of services you want to test locally. If you modify the definition of an
+  object that causes multiple services to have compile errors, you can choose to test only the related service first,
+  then test dependent services as they are modified to provide the additional information. 
+- Redis is pitched as speeding up slow databases. You don't start with a slow database, so don't start with Redis. When
+  your database becomes slow, optimize what you can in the database first. For SQL, you have choices like query
+  optimizations and restructuring, materialized views, partitions, and replication.
+- SQL vendors generally provide full text searching. The network round trip to Elasticsearch is not going to be any
+  different than the database, and the indexes are not necessarily any faster. Hammering away on SQL queries as the user
+  types in a filter box is not autommatically any less performant than hammering away on Elasticsearch queries.
+- SQL vendors generally support recursive CTEs, which can  be used for graph queries amongst other things. It is
+  possible to use recursive CTEs with one data point, and spider out to the the whole graph containing that point.
+- In general, when you need some new functionality, your first thought should be can I do this with SQL in a reasonable
+  fashion, and will it work well enough? If so, try that first before adding new infrastructure. More infrsatructure is
+  more complexity, more to deploy, more code, more everything. Don't underestimate how much extra work is added, and
+  consider that the cost of that extra infrastructure will only grow and become more work over time.
+- You can add infrastructure whenever you want, it does not have to be an upfront decision. You can add stuff like
+  Kafka, Neo4J, Redis, Logstash, Elasticsearch, and anything else as needed.
