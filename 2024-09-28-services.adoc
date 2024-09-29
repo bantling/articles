@@ -17,6 +17,10 @@ I worked with a team who decided to use a microservices approach, that worked as
 - Elasticsearch for full text searching in one of those text/select combo widgets where users can type and see results
   on the fly to select from.
 - Logstash to populate Elasticsearch
+- Websockets to ensure that when multiple users are looking at same screen and one of them adds an entry to a table, the
+  other users see the new table entry show up without clicking anything (this might have also used Kafka)
+- Kafka to create training data and replay later it in a desired amount of clock time, with ability to rewind or
+  fast forward
 - Swagger to generate a proxy that sits in front of all the services, so the HTML/JS client connects to only one service
 
 Most of these points were not helpful or unnecessary:
@@ -49,7 +53,7 @@ Here is an example of a simpler system, that is probably useful in a lot of simi
 - Use events instead of HTTP when services communicate to each other. If the services are in the same language, then
   the event can be received directly in the same process, otherwise a stub receiver can use HTTP.
 - If you have multiple languages, that does not mean you need multiple containers or a proxy. A single container can run
-  each language as a separate process with a separate port, and the JS client to connect to the appropriate port for
+  each language as a separate process with a separate port, and the JS client can connect to the appropriate port for
   each service.
 - Use a simple code generator that takes a TOML file to generate an object definition, a service, an HTTP event stub for
   each language, and a JS client.
@@ -62,14 +66,19 @@ Here is an example of a simpler system, that is probably useful in a lot of simi
 - Redis is pitched as speeding up slow databases. You don't start with a slow database, so don't start with Redis. When
   your database becomes slow, optimize what you can in the database first. For SQL, you have choices like query
   optimizations and restructuring, materialized views, partitions, and replication.
+- In this simple usage of Kafka, SQL tables would have been fine instead
 - SQL vendors generally provide full text searching. The network round trip to Elasticsearch is not going to be any
   different than the database, and the indexes are not necessarily any faster. Hammering away on SQL queries as the user
   types in a filter box is not autommatically any less performant than hammering away on Elasticsearch queries.
 - SQL vendors generally support recursive CTEs, which can  be used for graph queries amongst other things. It is
   possible to use recursive CTEs with one data point, and spider out to the the whole graph containing that point.
-- In general, when you need some new functionality, your first thought should be can I do this with SQL in a reasonable
-  fashion, and will it work well enough? If so, try that first before adding new infrastructure. More infrsatructure is
-  more complexity, more to deploy, more code, more everything. Don't underestimate how much extra work is added, and
-  consider that the cost of that extra infrastructure will only grow and become more work over time.
-- You can add infrastructure whenever you want, it does not have to be an upfront decision. You can add stuff like
-  Kafka, Neo4J, Redis, Logstash, Elasticsearch, and anything else as needed.
+- If you need the ability to store arbitrary extra info over and above defined columns (eg, user defined key/value
+  pairs), you can use a JSON column to store it.
+
+In general, when you need some new functionality, your first thought should be can I do this with SQL in a reasonable
+fashion, and will it work well enough? If so, try that first before adding new infrastructure. More infrsatructure is
+more complexity, more to deploy, more code, more everything. Don't underestimate how much extra work is added, and
+consider that the cost of that extra infrastructure will only grow and become more work over time.
+
+You can add infrastructure whenever you want, it does not have to be an upfront decision. You can add stuff like Kafka, 
+Neo4J, Redis, Logstash, Elasticsearch, and anything else as needed.
