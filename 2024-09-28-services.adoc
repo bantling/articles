@@ -15,13 +15,13 @@ I worked with a team who decided to use a microservices approach, that worked as
 - Postgres database
 - Redis to cache query results
 - Elasticsearch for full text searching in one of those text/select combo widgets where users can type and see results
-  on the fly to select from.
+  on the fly to select from
 - Logstash to populate Elasticsearch
-- Websockets to ensure that when multiple users are looking at same screen and one of them adds an entry to a table, the
-  other users see the new table entry show up without clicking anything (this might have also used Kafka)
+- Websockets to ensure that when multiple users are looking at the same screen and one of them adds an entry to a table,
+  the other users see the new table entry show up without clicking anything
 - Kafka to create training data and replay later it in a desired amount of clock time, with ability to rewind or
   fast forward
-- Swagger to generate a proxy that sits in front of all the services, so the HTML/JS client connects to only one service
+- Swagger to generate a proxy that sits in front of all the services, so the HTML/JS client connect to only one service
 
 Most of these points were not helpful or unnecessary:
 
@@ -31,8 +31,8 @@ Most of these points were not helpful or unnecessary:
 - Since sometimes service A calls service B, each service needs access to all objects that are converted to/fromm JSON,
   which leads to a separate repo for object definitions
 - A dev working on service B might not have service A checked out. Even if he did, modifying the object definition of B
-  won't show a compile error in service A until A is updated to latest object definitions. This leads to spending a lot
-  of time figuring out why occasionally B objects are missing some data.
+  won't show a compile error in service A until A is updated with the latest object definitions. This leads to spending
+  a lot of time figuring out why occasionally B objects are missing some data.
 - Devs were writing code that would check Redis for data, if not found, query Postgres and store it in Redis, despite
   the fact the database would only get about 10,000 rows inserted per year, which is nothing for an SQL database
 - Logstash selects data from Postgres to insert into Elasticsearch. If data is deleted in Postgres, you have to find
@@ -56,7 +56,9 @@ Here is an example of a simpler system, that is probably useful in a lot of simi
   each language as a separate process with a separate port, and the JS client can connect to the appropriate port for
   each service.
 - Use a simple code generator that takes a TOML file to generate an object definition, a service, an HTTP event stub for
-  each language, and a JS client.
+  each language, and a JS client. Any custom code required is in a separate subdirectory of the service, so that the
+  generator can be altered without necessarily having to alter the custom code. Make a simple abstraction using events
+  for the generated code to call the custom code.
 - Use a simple build system that compiles all or a chosen subset of service directories. For each service, the compiler
   only sees that one service and all object definitions. This catches cases of a service directly calling the code of
   another service, rather than communicating via events as expected.
@@ -76,9 +78,29 @@ Here is an example of a simpler system, that is probably useful in a lot of simi
   pairs), you can use a JSON column to store it.
 
 In general, when you need some new functionality, your first thought should be can I do this with SQL in a reasonable
-fashion, and will it work well enough? If so, try that first before adding new infrastructure. More infrsatructure is
+fashion, and will it work well enough? If so, try that first before adding new infrastructure. More infrastructure is
 more complexity, more to deploy, more code, more everything. Don't underestimate how much extra work is added, and
 consider that the cost of that extra infrastructure will only grow and become more work over time.
 
 You can add infrastructure whenever you want, it does not have to be an upfront decision. You can add stuff like Kafka, 
-Neo4J, Redis, Logstash, Elasticsearch, and anything else as needed.
+Neo4J, Redis, Logstash, Elasticsearch, and anything else as needed. If a solution involving SQL tables is no longer
+sufficient, you can migrate to something else, where you have knowledge of a real, rather than perceived, problem.
+
+Another consideration is unknwable future changes, where suddenly you discover that some of the current choies are now
+holding you back. An example is companies deciding on a new requirement for vulnerability scans, where your container
+cannot contain any critical or high vulnerabilities. If your current approach is something that vacuums up great gobs of
+libraries, like Java Spring or Python FastAPI/Uvicorn, then you can find yourself in a situation where you are spending
+too much time resolving vuln of the week. You want to deploy, but are held hostage by the latest vuln.
+
+At the same time, the customer also has unknowable changes that can be just like the example of vulns. There could be
+external forces (laws and regulations), internal forces (make the system less time consuming), or added features (row
+level security) that require changes throughout the services.
+
+If your approach primarily uses code generation based on TOML and events, with as little custom code as possible, then
+you can change the approach as needed. In my example of vulns, you could change to a possibly very different library
+that doees not suffer from frequent vulns, and use the same event system for the custom code.
+
+Any such changes could be applied first to a service that has no custom code to verify it is working, then the service
+with the most custom code to ensure the new approach works in the worst case, then the remaining services. You could
+even change languages. You might decide to switch the language for most services, and let some services remain in the
+old language for various reasons.
