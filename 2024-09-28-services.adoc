@@ -25,10 +25,10 @@ I worked with a team who decided to use a microservices approach, that worked as
 
 Most of these points were not helpful or unnecessary:
 
-- Contrary to popular opinion, Java does not require using Sprinng or JPA. the JRE comes with HttpHandler and JDBC,
+- Contrary to popular opinion, Java does not require using Spring or JPA. The JRE comes with HttpHandler and JDBC,
   which are roughly equivalent to the above Go built in packages
 - Devs can't be bothered to check out all repos once there are too many to bother with
-- Since sometimes service A calls service B, each service needs access to all objects that are converted to/fromm JSON,
+- Since sometimes service A calls service B, each service needs access to all objects that are converted to/from JSON,
   which leads to a separate repo for object definitions
 - A dev working on service B might not have service A checked out. Even if he did, modifying the object definition of B
   won't show a compile error in service A until A is updated with the latest object definitions. This leads to spending
@@ -47,24 +47,26 @@ perfectly ok. A monolith doesn't have to mean having only one code base in one l
 to achieve a monolithic deployment in the sense of always deploying all the code, but still decomposing it into
 separate services.
 
-Here is an example of a simpler system, that is probably useful in a lot of similar cases:
+Here is an example of a simpler system, that is more useful in a lot of similar cases:
 
 - Have one repo with top level directories for each service, and one for object definitions
-- Use events instead of HTTP when services communicate to each other. If the services are in the same language, then
-  the event can be received directly in the same process, otherwise a stub receiver can use HTTP.
-- If you have multiple languages, that does not mean you need multiple containers or a proxy. A single container can run
-  each language as a separate process with a separate port, and the JS client can connect to the appropriate port for
-  each service.
-- Use a simple code generator that takes a TOML file to generate an object definition, a service, an HTTP event stub for
-  each language, and a JS client. Any custom code required is in a separate subdirectory of the service, so that the
-  generator can be altered without necessarily having to alter the custom code. Make a simple abstraction using events
-  for the generated code to call the custom code.
+- Use events when requests come in via HTTP or when services communicate to each other. A separate service receives
+  these events, and are handled by a simple Map<Event,Processor>. The processor can return a result back to the event
+  service, which can pass the result baack to the HTTP client or requesting service. 
+- If you have multiple languages, that does not mean you need multiple containers. A single container can run each
+  language as a separate process with a separate port. Each language has its own event service. If a service needs to
+  call to another language, it can use internal HTTP communication to the other language event service, which works the
+  same as if an external client made the same request.
+- Create a basic framework for the common case of a data driven service, along the lines of a generic base class with
+  methods for upserting, querying, and deleting data from SQL. All a new service needs to do is provide the object type.
+- Create an example service that can be copied whenever a new service needs to be created. This example service is not
+  included in the runtime process.
 - Use a simple build system that compiles all or a chosen subset of service directories. For each service, the compiler
-  only sees that one service and all object definitions. This catches cases of a service directly calling the code of
+  only sees that one service and the object definitions. This catches cases of a service directly calling the code of
   another service, rather than communicating via events as expected.
-- Generate a Containerfile for a chosen subset of services you want to test locally. If you modify the definition of an
-  object that causes multiple services to have compile errors, you can choose to test only the related service first,
-  then test dependent services as they are modified to provide the additional information. 
+- Building a chosen subset of services you want to test locally is useful when you modify the definition of an object
+  that causes multiple services to have compile errors. You can choose to test only the owning service first, then test
+  dependent services as they are modified to provide the additional information. 
 - Redis is pitched as speeding up slow databases. You don't start with a slow database, so don't start with Redis. When
   your database becomes slow, optimize what you can in the database first. For SQL, you have choices like query
   optimizations and restructuring, materialized views, partitions, and replication.
@@ -78,29 +80,33 @@ Here is an example of a simpler system, that is probably useful in a lot of simi
   pairs), you can use a JSON column to store it.
 
 In general, when you need some new functionality, your first thought should be can I do this with SQL in a reasonable
-fashion, and will it work well enough? If so, try that first before adding new infrastructure. More infrastructure is
-more complexity, more to deploy, more code, more everything. Don't underestimate how much extra work is added, and
-consider that the cost of that extra infrastructure will only grow and become more work over time.
+fashion, and will it work well enough? Try a proof of concept first before adding new infrastructure. More
+infrastructure is more complexity, more to deploy, more code, more everything. Don't underestimate how much extra work
+is added, and consider that the cost of that extra infrastructure will only grow and become more work over time. Once
+infrastructure is added, it tends to hang around for the remainder of the project lifetime.
 
 You can add infrastructure whenever you want, it does not have to be an upfront decision. You can add stuff like Kafka, 
-Neo4J, Redis, Logstash, Elasticsearch, and anything else as needed. If a solution involving SQL tables is no longer
-sufficient, you can migrate to something else, where you have knowledge of a real, rather than perceived, problem.
+Neo4J, Redis, Logstash, Elasticsearch, DuckDB/Snowflake/etc and anything else as needed. If a solution involving SQL
+tables is no longer sufficient, you can migrate to something else, where you have knowledge of a real, rather than
+perceived, problem. Consider if the new infrastructure is general enough to use in multiple services, and add it to the
+generic base class, to avoid subtle bugs in differences in the usage of it from one service to another.
 
-Another consideration is unknwable future changes, where suddenly you discover that some of the current choies are now
+Another consideration is unknowable future changes, where suddenly you discover that some of the current choies are now
 holding you back. An example is companies deciding on a new requirement for vulnerability scans, where your container
 cannot contain any critical or high vulnerabilities. If your current approach is something that vacuums up great gobs of
 libraries, like Java Spring or Python FastAPI/Uvicorn, then you can find yourself in a situation where you are spending
-too much time resolving vuln of the week. You want to deploy, but are held hostage by the latest vuln.
+too much time resolving vuln of the week. You want to deploy, but are held hostage yet again by the latest vuln. Or
+maybe you find over time that the library/framework you are using makes breaking changes that you find annoying.
 
-At the same time, the customer also has unknowable changes that can be just like the example of vulns. There could be
-external forces (laws and regulations), internal forces (make the system less time consuming), or added features (row
-level security) that require changes throughout the services.
-
-If your approach primarily uses code generation based on TOML and events, with as little custom code as possible, then
-you can change the approach as needed. In my example of vulns, you could change to a possibly very different library
-that doees not suffer from frequent vulns, and use the same event system for the custom code.
+At the same time, the customer also has unknowable changes (row level security), there could be external forces (laws
+and regulations), internal forces (make the system less time consuming to develop), that require changes to the base
+class(es) and possibly some of the services. If your approach primarily uses a simple event mechanism, with as little
+custom code as possible, then it is that much easier to make needed changes.
 
 Any such changes could be applied first to a service that has no custom code to verify it is working, then the service
 with the most custom code to ensure the new approach works in the worst case, then the remaining services. You could
-even change languages. You might decide to switch the language for most services, and let some services remain in the
-old language for various reasons.
+even change languages for some services if that is the best path.
+
+With some simple tooling and design choices, you can have a set of services that compose a monolith where you only have
+one container for the code, and a container for each piece of infrastructure. The resulting small number of containers
+can be run locally, allowing much faster development than having to deploy every change to a development server.
