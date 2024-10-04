@@ -42,40 +42,51 @@ I worked with a team who decided to use a microservices approach, that worked as
 - Without any real knowledge of service dependencies or any tooling, every container would need to be deployed every time
 - There was no fault tolerance, if a service goes down that some other service needs, that other service would also fail
 
-Effectively, we had what others have called a distributed monolith. A far better, more useful approach would be to
-simply admit a monolith is perfectly ok. A monolith doesn't have to mean having only one code base in one language - a
-hybrid approach can be used to achieve a monolithic deployment in the sense of always deploying all the code, but still
-decomposing it into separate services.
+Effectively, we had what others have called a distributed monolith. It really wasn't microservices, it was but a poor
+mans shadow of microservices. A far better, more useful approach would be to simply admit a monolith is perfectly ok.
+A monolith doesn't have to mean having only one code base in one language - a hybrid approach can be used to achieve a
+monolithic deployment in the sense of always deploying all the code, but still decomposing it into separate services.
 
 Large companies like a Google or Netflix will have all the tooling they need because they have all the money for
 anything they want. This is not true for most teams who want to use some kind of services approach, and I think it would
-fair to say were trying to play in the big boys sandbox, without any of the big boys tools.
+fair to say in the above example, we were trying to play in the big boys sandbox, without any of the big boys tools.
+
+I don't see anything wrong with have a distributed monolith - microservices it not for everyone, it is no more a saviour
+of developer kind than any other approach we have taken over the years. Not everyone needs to have things like fault
+tolerance, where if service A calls service B and service B is down, service A can continue to work in a degraded
+fashion, rather than erroring out.
 
 Here are some ideas for a simpler system, along with some simple tooling, that is more useful for cases where a
 monolithic deployment is ok:
 
-- Have one repo with top level directories for each service, and one for object definitions
-- Use events when requests come in via HTTP or when services communicate to each other. A separate service receives
-  these events, and are handled by a simple Map<Event,Processor>. The processor can return a result back to the event
-  service, which can pass the result back to the HTTP client or requesting service.
+- Have one repo with top level directories for each language, that contain subdirectories for objects, config, events,
+  example service, and services
+- Use events when requests come in via HTTP or when services communicate to each other. The events are handled by a
+  simple Map<Event,Processor>. The processor receives data from the event (eg URL path variables, query params, cookies,
+  the decoded request body as the appropriate object, etc), and can return a result back to the event service, which can
+  pass the result back to the HTTP client or requesting service.
+- If languages need to talk to each other, they can do so by hitting the event service of the other language. Eg, the
+  user sends an HTTP request to the Go event service, that dispatches to a particular Go service, that sends an HTTP
+  request to the Java event service, that dispatchees to a particular Java service, and the result makes its way back
+  to the Go service, and ultimately back to the initial HTTP response.
 - Sort out logging details at the outset. If your company uses a system like DataDog to vacuum up all the console logs,
   then only log to the console, no purpose in wasting space on files that will never be read.
-- Include a trace id in each request via headers/event data, which can be in the logs. The idea is if Bob hits save on
-  Tuesday at 2PM, and you are tracking down the issue, you can start by finding Bob's error, grab the trace id, search
-  for that it to get all logs from every service that ultimately was involved in Bob hitting save. Check your logging
-  system to see if there is a standard header name you can use that the system recognizes.
-- If you have multiple languages, that does not mean you need multiple containers. A single container can run each
-  language as a separate process with a separate port. Each language has its own event service. If a service needs to
-  call to another language, it can use the event system which makes an internal HTTP call to the other language event
-  service. The entry point can be a shell script that executes all but one language in the background, and the
-  final language in the foreground. 
+- Include a trace id in each request via headers/event data, which is provided in the logs. The idea is if Bob hits save
+  on Tuesday at 2PM, and you are tracking down the issue, you can start by finding Bob's error, grab the trace id,
+  search for it to get all logs from every service that ultimately was involved in Bob hitting save. Check your log
+  viewing/analyzing system to see if there is a well known header name you can use that the system recognizes.
+- If you have multiple languages, they are separate containers
+- You can use podman to run all the code containers and infrastructure containers locally in a single pod, kind of like
+  docker composse, but simpler. The containers are on the same network, so can contact each other as localhost:port.  
 - Create a basic framework for the common case of a data driven service, along the lines of a generic base class with
-  methods for upserting, querying, and deleting data from SQL. All a new data driven service needs to do to start is
-  provide the object type.
-- It is ok to use something like Jave JPA or Spring that uses a lot of memory, because you only have one copy of it for
-  all services.
-- Create an example service that can be copied whenever a new service needs to be created. This example service is not
-  included in the runtime process. You could have one of these for each language, in a separate top level directory.
+  methods for upserting, querying, and deleting data from SQL. All a new data driven service needs to do is provide the
+  object type. Consider using PUT as upsert as I wrote in another post about using more RFC compliant REST APIs for
+  simplicity (https://www.tumblr.com/greggermeister/761096020234043392/rest-and-http-semantics), and leaving POST
+  available for non-crud operations.
+- It is ok to use something like Jave JPA or Spring that uses a lot of memory, because there will only be one container
+  with all Java servicces, therefore you only have only copy of Spring and JPA in memory.
+- Create an example service in each language that can be copied whenever a new service needs to be created. This example
+  service is not included in the runtime process.
 - Compile all or a chosen subset of service directories. For each service, the compiler only sees that one service and
   the object definitions. This catches cases of a service directly calling the code of another service, rather than
   communicating via events as expected.
@@ -93,8 +104,10 @@ monolithic deployment is ok:
   possible to use recursive CTEs with one data point, and spider out to the the whole graph containing that point.
 - If you need the ability to store arbitrary extra info over and above defined columns (eg, user defined key/value
   pairs), you can use a JSON column to store it.
-- Performance is a problem when the customer says it is a problem, not until. A real performance problem has a
-  measurement, so that a measurable gain can be provided when the performance has been improved.
+- A real performance problem has a measurement, so that a measurable gain can be provided when the performance has been
+  improved. Ideally, metrics should be defined and monitored, so that when a threshold like 80% of a given limit has
+  been reached, devs can consider how to improve that metric before customers complain about it. Look into the details
+  of the log viewing/analyzing system, it may have the features you need.
 
 In general, when you need some new functionality, your first thought should be can I do this with SQL in a reasonable
 fashion, and will it work well enough? Try a proof of concept first before adding new infrastructure. More
@@ -103,10 +116,10 @@ work is added, and consider that the cost of that extra infrastructure will only
 Once infrastructure is added, it tends to hang around for the remainder of the project lifetime.
 
 You can add infrastructure whenever you want, it does not have to be an upfront decision. You can add stuff like Kafka, 
-Neo4J, Redis, Logstash, Elasticsearch, DuckDB/Snowflake/etc as needed. If a solution involving SQL tables is no longer
-sufficient, you can migrate to something else, where you have knowledge of a real, rather than perceived, problem.
-Consider if the new infrastructure is general enough to use in multiple services, and add it to the generic base class,
-to avoid subtle bugs in differences in the usage of it from one service to another.
+Neo4J, Redis, Logstash, Elasticsearch, DuckDB/Snowflake/BigQuery, etc as needed. If a solution involving SQL tables is
+no longer sufficient, you can migrate to something else, where you have knowledge of a real, rather than perceived,
+problem. Consider if the new infrastructure is general enough to use in multiple services, and add it to the generic
+base class, to avoid subtle bugs in differences in the usage of it from one service to another.
 
 You will get unknowable future changes, where suddenly you discover that some of the current choices are now holding you
 back. An example is a company decision on a new requirement for vulnerability scans, where your container cannot contain
@@ -115,11 +128,11 @@ like Java Spring or Python FastAPI/Uvicorn, then you can find yourself in a situ
 time resolving vuln of the week. You want to deploy, but are held hostage yet again by the latest vuln. Or maybe you
 find over time that the library/framework you are using makes breaking changes that you find annoying.
 
-At the same time, the customer also has unknowable changes that can impact the design on some level, there could be
-external forces (laws and regulations), internal forces (make the system less time consuming to develop), that require
-changes to the base class(es) and possibly some of the services. If your approach primarily uses a simple event
-mechanism, with base classes that require as little custom code as possible, then it is that much easier to make needed
-changes.
+At the same time, the customer also has unknowable changes that can impact the design on some level. There could also be
+external forces (laws and regulations), internal forces (make the system less time consuming to develop). All of these
+forces can require changes to the base class(es) and possibly some of the services. If your approach primarily uses a
+simple event mechanism, with base classes that require as little custom code as possible, then it is that much easier to
+make needed changes.
 
 Any such changes could be applied first to a service that has no custom code to verify it is working, then the service
 with the most custom code to ensure the new approach works in the worst case, then the remaining services. You could
@@ -127,7 +140,10 @@ change languages for some services if that is the best path, or even leave some 
 
 == Conclusion
 
-With some simple tooling for compiling what you want, running it locally in containers, communicating by events, you can
-have a set of services that compose a monolith where you only have one container for the code, and a container for each
-piece of infrastructure. The resulting small number of containers can generally be run locally without issue, allowing
-much faster development than having to deploy every change to a development server.
+With some simple tooling for compiling what you want, running it locally in containers, communicating by events, with a
+logging and monitoring strategy, you can have a set of services that compose a monolith where every service is deployed
+every time, and you only have one container for each language. The resulting small number of containers can generally be
+run locally without issue, allowing much faster development than having to deploy every change to a development server.
+
+The net effect is not a full blown microservices platform, but a more realistic take on deploying services when your
+company isn't big enough to make the kind of tooling required for full microservices, but you get the basic benefits.
