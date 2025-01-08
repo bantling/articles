@@ -1,0 +1,36 @@
+:doctype: article
+
+= Creating an Arch Linux ARM QEMU VM on a Mac M1
+
+I created a simple self-contained script that does the following basic steps:
+
+* Download an EFI BIOS
+* Download an Arch Linux ARM bootable ISO image
+* Create a raw data image with a FAT filesystem that contains some scripts to use on first boot, and an empty raw Linux image
+* Boot up ISO image
+* User runs a command to mount and execute a setup script
+* Setup script partitions the empty raw Linux image, downloads and extracts a base Arch Linux ARM image into it, and shuts down
+* Host script converts the raw Linux image into a compressed sparse qcow2 image
+* Creates an ArchLinux.app bundle that can be double clicked in the Finder or added to the Dock to run the VM
+
+There were a few bits that were a little tricky to figure out:
+
+* Due to differences between x86 and arm boot processes, a bootable ISO doesn't seem to be useful for making a bootable
+  arm system, but it is useful to create a Linux filesystem
+* A data image needs to be used that has a FAT filesystem, as the Mac host and the Linux ISO can both access FAT
+* If you create an empty Linux image in the FAT filesystem using the Linux dd command, the Mac may or may not be able to
+  copy the image out of the FAT filesystem. Seems the Mac is fond of saying the path name is too long. This is solved by
+  having the Mac dd command create the empty Linux image.
+* I downloaded an SVG image for the App bundle icon of the big blue Arch "A". I found the gm cli tool could not convert
+  this particular svg into png correctly, it was a crappy image, missing some of the colours. I used GIMP to do it
+  manually instead.
+* I wanted one self-contained script, so all the scripts that need to be created on the host and in the Linux VM are
+  contained in Heredocs inside the script.
+
+The script runs in about 5 minutes, with a few user interactions. I find the performance is pretty good, it boots really fast.
+
+I did find that using a graphical X system seems to have stability issues that cause apps to crash, so I'm only using it
+for the console. I really just need docker and podman, as they hard to get working on the Mac, but easy as can be in Arch.
+
+Overall, I'm quite happy with the result. Try it out at https://github.com/bantling/tools/tree/master/qemu-vms, which
+explains in detail how to use it.

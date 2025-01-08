@@ -1,0 +1,26 @@
+:doctype: article
+
+= Multiple Inheritance in Java
+See the link:https://github.com/bantling/tools/tree/master/java-multipleinheritance/src/mi[Java Code]
+
+Ever since Java 8 introduced default interface methods, I felt there had to be a way to use it for multiple inheritance.
+I have never needed it, but I was bored for a bit today, so decided to try the following idea:
+
+* Create a non-public class XData to hold the fields the interface needs to work with, and a public interface X in the
+  same X.java source file
+* The interface has one virtual method getXData() that returns the XData instance
+* The remaining interface methods are default methods that call getXData() to read and write the fields as necessary to
+  perform some useful operations.
+* Create another interface Y and class YData in the same pattern
+* Create a class XY that implements both interfaces X and Y
+* The class XY has XData and YData fields, which are returned by getXData() and getYData(). These are the only two
+  interface methods XY is required to inplement.
+* I didn't bother in my example, but XY would have to decide how to implement the Object methods hashCode, equals, and
+  toString. These methods cannot be implemented by interfaces (but they could be implemented in XData and YData classes, if desired)
+
+The end result is the XY class is an instance of both X and Y interfaces, and inherits the encapsulated behaviours of
+both X and Y default methods - multiple inheritance by any reasonable measure.
+
+It is better than C++ multiple inheritance, in that all constructor logic and declared fields are in the XY class. The
+only problem you could get is if X and Y interfaces declare the same method that differs only by return type - but this
+is just a general problem of implementing multiple interfaces.

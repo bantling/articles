@@ -1,0 +1,85 @@
+:doctype: article
+
+= Simply reading the code doesn't work
+
+I read an article about not trusting third party code at https://unixsheikh.com/articles/no-you-cannot-trust-third-party-code-without-reading-it-first.html.
+
+Quite frankly, it struck me as an off the rails rant, I can't remotely see how it got into the CP news list, unless
+popularity is the only requirement.
+
+I can think of many reasons why it is just not possible or practical to read all the code you ship, as obvious as that
+idea might sound (particularly to a non-programmer). Here are a few:
+
+* You need to use a math library that takes advantage of processor instructions like SSE or SIMD that have no
+  representation in pretty much any high level programming language. Even if it is, it is almost guaranteed to be
+  handled by an underlying C library that has the assembly included in it. Does anyone on your team actually know how to
+  read assembly?
+* You use a spectacularly large library like Spring or JPA, which are megabytes of code. Who has time to read all that?
+  Can you even read that code?
+* Do you even know what Proxy and MethodHandle are?
+* Have you any idea how runtime byte code generation is being used?
+* Do you actually understand how generics work at runtime - eg, do you know what generic information is available at
+  runtime, or how to get it?
+* Do you know what kind of circular infinite loop can be caused by proxying a default interface method? Or how to solve
+  it with the InvokeSpecial byte code?
+* Are you even qualified to find security issues in the first place? If you're an average dev:
+** You've spent 0 hours, 0 minutes, and 0 seconds assessing security of code At best, you run some scanner as part of a
+   Jenkins job
+** You probably don't even know why encrypting passwords is completely bloody pointless
+** You get the same tired old OWASP top 10 training at every company, but have never actually read the OWASP in its
+   entirety, never mind write insecure code, and learn how to exploit it and fix it
+* Do you get that blindly following the crowd and treating security as a tickbox is the EXACT OPPOSITE of any kind of
+  real security?
+* Who pays for this time spent reading all that code?
+* What about - god bloody forbid - an update to that underlying SIMD/SSE C/Assembly library or gifreakingnormous Java library?
+** Can you assess the update in isolation, or do you need to reexamine a larger section of code around it?
+** How do you determine the bounds of the larger section of code around it?
+** And who pays for reassessing every update?
+* How do you keep a consistent quality of security via code reading as people come and go?
+* Is any old random assortment of junior, intermediate, and senior devs amenable to determining security of code?
+* What about the elephant in the room called licensing? What about all the proprietary code that open source libs may
+  use, but cannot alter or reverse engineer? And therefore, you can't read it!
+
+I'm sure given the time, I could write 6 more pages of reasons why this just isn't practical. Does that mean we should
+shrug our shoulders, say meh, and keep doing what we're doing?
+
+I'm not a great fan of cynicism. I think the best option for supply chain security is to embrace small programming
+libraries, that you can, in fact, actually read. Look for libraries that:
+
+* Are just "straightforward" programming (no runtime code generation, no embedding of base64 text, no weird pragmas to
+  turn off compiler options, etc)
+* Provide bang for buck with a small set of functionality
+* Are small enough to be practical to actually read it
+* Try to use as few of such libraries as possible. Combine this with a language that removes any uncalled functions when
+  generating the executable, which further limits your exposure to any security issues you might have missed.
+
+Now the question becomes: can I actually ship a real world application that works that way? Well there are some factors
+to consider:
+
+* You don't HAVE to use the most complex libraries possible that have as much as code as possible.
+* You don't HAVE to have a super complex frig-ton of Javascript happening in the browser. You can - brace yourself -
+  actually use server side rendering with almost no javascript. My bank does this, and it is faster than sites that use
+  client rendering.
+* You don't HAVE to constantly masturbate at every shiny new toy that appears on the horizon, just because it exists.
+* You CAN - believe it not - just keep using the same stuff. Even with all that fancy computer crap, car mechanics still
+  use wrenches, and cars are still four wheels, a couple of pedals, and a steering wheel.
+* A lot of "improvements" are really not:
+** How many hundreds of hours were spent developing Lombok so devs could avoid spending seconds using their IDE to
+   generate updated accessor methods, toString, and hashCode?
+** What is so great about VSCode compared to Eclipse? I'm forced to use VS Code because everyone else uses it, so some
+   extensions I need are now only available for VS Code. I fail to see the improvement here.
+** Every new language requires rewriting all libraries again (SVG, CSV, math, http, ad infifreakinitum)
+
+I would argue that more than anything else, this bloody obsession with new languages and libraries makes supply chain
+security next to impossible to keep on top of. In other words, you'd basically have to convince the entire damned
+developer world they are all doing it wrong, and what they should be doing instead. The first part of that argument is
+probably pretty easy, good luck with the second half!
+
+While I agree with the authors rant that we are doing a poor job of security, and are simply lying in the bed we created,
+I will most emphatically disagree that some simple childish answer like "Just read all the code. Duh." is the solution.
+
+I'm personally not convinced this problem can be solved by writing more code - only by writing less code, and by using
+processes geared towards security, not yet more candy for developers to rot their teeth with.
+
+I can't honestly say my hopes are particularly high this will actually happen. If it does, it will only be because it is
+foisted upon us by others.
