@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= I don't give a git about your programming preferences, and you shouldn't give a git about mine
+
+Screw the Tiobe index, those motherduckers can go sort themselves. There is absolutely no bloody relevance what so
+bloody ever to the popularity of languages or frameworks any more than than there is to regional salary comparisons.
+
+Who gives a git if you like or don't like Go, Python, or whatever ever other snit-hot thing is so this week. What does
+that have to do with real decision making on real world projects? It's just a bunch of mental masturbation.
+
+Why are devs so obsessed with popularity of tools? Is that why you chose to be a dev - because it's popular? Is that why
+you eat meat instead of tofu, drink orange juice instead of beer? At what point do you see these languages and tools on
+the cover of Runway or Rolling Stone?
+
+Invariably, when I read these puff pieces, they never provide any context - the article reads like some kind of
+absolute. Well, if that were true, then why do you need to say it?
+
+My career contextual bubble is:
+- Data driven apps
+- Users enter data slowly, because there are not a ton of them, and they have multiple screens and record types
+- An example would be a system expected to have 10,000 new records per year. At that rate, it would take a century to
+  have a million rows.
+- The performance required is low enough that most every query problem could be solved by an index or a rewrite
+- No need for tools like Redis or Kafka - just do it all in the SQL database. Pretty much all SQL vendors have JSON and
+  full text storage and search support, and other useful features.
+- It's ok to write code in the database - an SQL if is like a Go if, an SQL loop is like a Java loop
+
+In other words, I'm working on the bottom 99% of web apps out there, hidden away in an internal system the company uses
+to manage itself, that nobody outside the company will ever know exists, and couldn't give a snit if they did. This is
+why languages and frameworks don't matter - any reasonable choice will do, just make sure you stick with SQL databases,
+as everyone in this bubble is used to them, and know how to deal with them.
+
+In this bubble, people think a language like C or C++ is some kind of horror movie evil apparition. Strangely, it is
+still relevant for stuff like, oh I don't know, maybe the linux kernel, tools like docker and podman, emulators like
+QEMU and VirtualBox, desktops like X Windows and Wayland, CLI tools (grep, sed, awk, etc) - you know the stuff we all
+use every day of our lives and are totally unbloody thankful somebody bothered to write for us.
+
+I expect of lot of us would feel some serious forkin' gratitude if we were plunked in front a 1980 VIC-20 with:
+- 5KB of ram
+- 1 MHz processor
+- A REPL 2 seconds after you turn it on
+- A BASIC language inspired by punch cards
+  - Uses line numbers
+  - GOTO and GOSUB to a line number
+  - All variables are global
+  - For bonus points, you can have some lines that shared as part of more than one routine
+- No internet
+- No help function
+- A manual with snitty BASIC games that entertain a 9 year old for slightly longer than it takes to type it in
+- A tape machine with worst possible filesystem
+  - Starlord uses these to play his mother's popular music, the only time you've even seen one
+  - Rewind to the beginning
+  - You could type in ``LOAD "filename"``, and the machine will search the tape to find the program - but this search
+    is only as fast as music would play on it, and each side can hold 30 minutes
+- What people actually did to load from tape:
+  - Hit a reset button to set the counter to 000
+  - Your filesystem is a piece of paper stuffed into the cassette case with the names and locations of each program
+  - Fast Forward until counter is where you know your program is located (say 150, don't have to be exact, 140 or so is
+    close enough)
+  - Hit Stop
+  - Type in LOAD command
+  - Press Play
+  - Wait a while until it it stops
+  - Type in RUN
+- Want an automated filesystem? Write one yourself:
+  - Save it at beginning of tape
+  - Load and run it
+  - Lists hard-coded menu of programs with a key to hit and a name (eg hitting 1 runs first program)
+  - Hit a key
+  - Press Fast Forward
+  - Program waits a set number of jiffies (1/60 of second), then stops the tape
+  - Press Stop and Play
+  - Wait for it to load
+- If a program is less than 50 lines or so, it is just as fast to retype it as it is to load it
+- No builtin disassembler or assembler
+- Hand write assembly on paper, hand translate each instruction into 1 to 5 decimal byte values, write a short BASIC
+  program to load a comma-separated list of the decimal byte values into memory and jump to the first memory location
+- If it goes into an infinite loop when you run it, then hit Run/Stop and Restore keys to reset to similar conditions as
+  when you turned it on. Go back to your hand written assembly, rinse, repeat.
+- Want cutting edge? Get a magazine with source code listings, and type them in. For extra fun, enter pages of hex codes
+  for a binary program, and hope it works.
+
+You don't like Go because it has error instead of exception? Awww, gee whiz, cry me a river while I try for the third
+time to get my pencil and paper assembly language program to hopefully run correctly this time.
+
+You think C and C++ are awful? Try writing assembly code for multiplication cause your CPU doesn't have that instruction.
+Or pretty much anything else you might expect out of its generous 200,000 transistors and 3 registers. Man people are so
+spoiled these days, with an absolute ton of resources that simply exist just a few decades ago.
+

@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: Apache-2.0
+:doctype: article
+
+= Repeating the same year is just how jobs work
+
+I keep seeing articles about developers who are just repeating the same year over and over again. This is intended as an
+insult, where the writer obviously feels they are a "real" developer, as if their career is somehow so much better. I
+don't know about you, but here are six words I never want to hear at any company I ever work for:
+
+We have very creative payroll accountants
+
+No thanks, I would rather just have the usual payroll accountants ensuring everyone gets paid on time with the correct
+amount of money - accountants who keep doing the same thing every year. Same goes for plumbers, and many other jobs - I
+need people who keep doing the same thing, and eventually reach a stage where they are as good as they ever get. These
+people enable me to have a variety of things I need in my daily life, such as:
+
+- Internet service
+- Phone service
+- Insurance of various kinds
+- Organizing volleyball games
+- The job I currently hold
+- Car repairs
+- Gas stations
+- Grocery stores
+
+If you took any two successive years of my developer career, they are probably quite similar. Every now and then, I
+change companies, but within a given company as long as I am on the same project, I am pretty much doing the same thing
+from month to month.
+
+Every now and then I get an interesting challenge. One project I worked on needed to use a map. We were using a JS map
+library to render objects overlaid on the map, and we were using PostGIS to do things like search for the airport
+nearest a geocoordinate. We needed to generate objects to be rendered on the map. Since we already had two GIS libraries
+in use, we did want to introduce a third. So we decided to use PL/pgSQL functions to generate these objects.
+
+Generating these objects required revisiting some high school trigonometry I had not used in years of for loops, OOP,
+reflection, REST, SQL, JSP, HTML, and all kinds of other stuff I can't even remember anymore. I knew how that trig
+worked off the top of my head. However, it was a case of using it in the right way, so the generated object would look
+correct on a map (eg, lines that are supposed to be parallel actually look parallel when zooming in, measured distances
+are correct, etc). It was a bit of a pain, but I got it right. It was a bit of fun once I got the first one working.
+
+Even though GIS and mapping problems (namely making sraight lines on a curved earth) sounds like some new challenge,
+was it really? In the end I used for loops, grade 11 math, and manual testing using geojson.io. The resulting SQL
+functions were simply part of the same scripts used to create tables and stuff.
+
+Is debugging Java really different from debugging an SQL function? Is writing JSP code to generate HTML really different
+from some client side library? Arguably, I've been using the same underlying process all along for the last 19 years
+of writing software professionally. The languages change, the approaches change, but debugging is the same - there are
+still situations where I don't have a debugger, and still situations where I do. Determining the best course of action
+is also the same, try the approach that seems best, and if it doesn't work out, modify it, or try something else.
+
+The point being, that computer programming is just another job. It isn't special in any real way - we have managers,
+coworkers, and tasks we need to perform. We don't always get along with our coworkers, we don't always agree with our
+managers. Some programmers are arrogant and think they are god's gift to programming. Some say stupid things like a
+programming language isn't ready for a given approach. Some do dumb things like use a caching library from the get go,
+when it is clearly not needed for the small amount of yearly data being added to the system, and small number of
+relatively simple queries being performed.
+
+We make the same mistakes as every other kind of job at our company, and grow the same way as every other kind of job.
+We're not special. So when one of us writes about some other dev as "repeating the same year" as an insult, they have
+simply described themselves and everyone else, and virtually every other job on this planet.
