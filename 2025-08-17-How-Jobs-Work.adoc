@@ -38,7 +38,7 @@ worked off the top of my head. However, it was a case of using it in the right w
 correct on a map (eg, lines that are supposed to be parallel actually look parallel when zooming in, measured distances
 are correct, etc). It was a bit of a pain, but I got it right. It was a bit of fun once I got the first one working.
 
-Even though GIS and mapping problems (namely making sraight lines on a curved earth) sounds like some new challenge,
+Even though GIS and mapping problems (namely making straight lines on a curved earth) sounds like some new challenge,
 was it really? In the end I used for loops, grade 11 math, and manual testing using geojson.io. The resulting SQL
 functions were simply part of the same scripts used to create tables and stuff.
 
